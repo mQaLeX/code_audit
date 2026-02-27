@@ -93,23 +93,34 @@ class TraceAgent:
             ))
             
             try:
-                llm_response = self.llm_client.chat_completion_with_metadata(messages, temperature=0)
+                response = self.llm_client.client.chat.completions.create(
+                    model=self.llm_client.model,
+                    messages=messages,
+                    temperature=0,
+                )
                 
-                action = llm_response.content.strip()
+                choice = response.choices[0]
+                content = choice.message.content or ""
+                action = content.strip()
                 
                 console.print(Panel(
                     action if action else "(空响应)",
-                    title=f"[bold]LLM 响应[/bold] (finish_reason: {llm_response.finish_reason})",
+                    title=f"[bold]LLM 响应[/bold] (finish_reason: {choice.finish_reason})",
                     border_style="green" if action else "red",
                     expand=False
                 ))
                 
-                if llm_response.is_empty():
-                    console.print(f"[dim]response.id: {llm_response.response_id}[/dim]")
-                    console.print(f"[dim]response.model: {llm_response.model}[/dim]")
-                    console.print(f"[dim]usage: prompt={llm_response.usage['prompt_tokens']}, completion={llm_response.usage['completion_tokens']}[/dim]")
+                if not content or not content.strip():
+                    console.print(f"[dim]response.id: {response.id}[/dim]")
+                    console.print(f"[dim]response.model: {response.model}[/dim]")
+                    console.print(f"[dim]usage: prompt={response.usage.prompt_tokens}, completion={response.usage.completion_tokens}[/dim]")
                     
-                    error_msg = llm_response.get_error_message()
+                    error_map = {
+                        "content_filter": "请求被安全过滤，请修改查询内容。",
+                        "length": "响应被截断，请简化请求。",
+                        "stop": "未收到有效命令，请重新尝试。"
+                    }
+                    error_msg = error_map.get(choice.finish_reason, f"未收到有效命令 (finish_reason: {choice.finish_reason})")
                     console.print(f"[red]原因: {error_msg}[/red]")
                     observation = error_msg
                     
@@ -192,11 +203,31 @@ class TraceAgent:
         }
         
         try:
-            structured_response = self.llm_client.chat_completion_structured(
-                final_messages, 
-                response_schema,
-                temperature=0,
-            )
+            if 'glm' in self.llm_client.model:
+                response = self.llm_client.client.chat.completions.create(
+                    model=self.llm_client.model,
+                    messages=final_messages,
+                    temperature=0,
+                    response_format={
+                        "type": "json_object"
+                    }
+                )
+            else:
+                response = self.llm_client.client.chat.completions.create(
+                    model=self.llm_client.model,
+                    messages=final_messages,
+                    temperature=0,
+                    response_format={
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": "trace_result",
+                            "strict": True,
+                            "schema": response_schema
+                        }
+                    }
+                )
+            
+            structured_response = json.loads(response.choices[0].message.content)
             
             code_map = []
             for item in structured_response.get("code_map", []):
@@ -398,6 +429,115 @@ class TraceAgent:
 
     def get_complete_traces_only(self, results: List[TraceResult]) -> List[TraceResult]:
         return [r for r in results if r.trace_complete]
+
+    def save_trace_results(self, trace_results: List[TraceResult], filename: str = None) -> str:
+        """
+        保存追踪结果到JSON文件
+        
+        Args:
+            trace_results: 追踪结果列表
+            filename: 保存的文件名，如果不提供则自动生成
+            
+        Returns:
+            保存的文件路径
+        """
+        reports_dir = os.path.join(os.path.dirname(__file__), "..", "reports")
+        os.makedirs(reports_dir, exist_ok=True)
+        
+        if not filename:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"trace_results_{timestamp}.json"
+        
+        report_path = os.path.join(reports_dir, filename)
+        
+        # 将TraceResult对象转换为可序列化的字典
+        serializable_results = []
+        for result in trace_results:
+            serializable_result = {
+                "task_id": result.task_id,
+                "function_info": {
+                    "file_path": result.function_info.file_path,
+                    "function_name": result.function_info.function_name,
+                    "code_snippet": result.function_info.code_snippet
+                },
+                "attack_surface": result.attack_surface,
+                "project_type": result.project_type,
+                "code_logic": result.code_logic,
+                "trace_complete": result.trace_complete,
+                "error_message": result.error_message,
+                "full_msg": result.full_msg,
+                "code_map": [
+                    {
+                        "file_path": ctx.file_path,
+                        "line_start": ctx.line_start,
+                        "line_end": ctx.line_end,
+                        "code_snippet": ctx.code_snippet,
+                        "context_type": ctx.context_type
+                    }
+                    for ctx in result.code_map
+                ]
+            }
+            serializable_results.append(serializable_result)
+        
+        with open(report_path, 'w', encoding='utf-8') as f:
+            json.dump(serializable_results, f, ensure_ascii=False, indent=2)
+        
+        console.print(f"[green]追踪结果已保存到: {report_path}[/green]")
+        return report_path
+
+    def load_trace_results(self, filepath: str) -> List[TraceResult]:
+        """
+        从JSON文件加载追踪结果
+        
+        Args:
+            filepath: JSON文件路径
+            
+        Returns:
+            追踪结果列表
+        """
+        if not os.path.exists(filepath):
+            raise FileNotFoundError(f"追踪结果文件不存在: {filepath}")
+        
+        with open(filepath, 'r', encoding='utf-8') as f:
+            serializable_results = json.load(f)
+        
+        trace_results = []
+        for serializable_result in serializable_results:
+            # 重建FunctionInfo对象
+            function_info = FunctionInfo(
+                file_path=serializable_result["function_info"]["file_path"],
+                function_name=serializable_result["function_info"]["function_name"],
+                code_snippet=serializable_result["function_info"]["code_snippet"]
+            )
+            
+            # 重建CodeContext对象列表
+            code_map = []
+            for ctx_dict in serializable_result["code_map"]:
+                code_map.append(CodeContext(
+                    file_path=ctx_dict["file_path"],
+                    line_start=ctx_dict["line_start"],
+                    line_end=ctx_dict["line_end"],
+                    code_snippet=ctx_dict["code_snippet"],
+                    context_type=ctx_dict["context_type"]
+                ))
+            
+            # 重建TraceResult对象
+            trace_result = TraceResult(
+                task_id=serializable_result["task_id"],
+                function_info=function_info,
+                attack_surface=serializable_result["attack_surface"],
+                project_type=serializable_result["project_type"],
+                code_logic=serializable_result["code_logic"],
+                trace_complete=serializable_result["trace_complete"],
+                error_message=serializable_result["error_message"],
+                full_msg=serializable_result["full_msg"],
+                code_map=code_map
+            )
+            
+            trace_results.append(trace_result)
+        
+        console.print(f"[green]已从文件加载 {len(trace_results)} 个追踪结果[/green]")
+        return trace_results
 
     def generate_trace_report(self, trace_results: List[TraceResult]) -> str:
         """

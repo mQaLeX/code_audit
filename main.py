@@ -3,6 +3,7 @@ import argparse
 import os
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 
 from rich.console import Console
 from rich.panel import Panel
@@ -194,6 +195,11 @@ def parse_arguments():
         help='LSP服务器命令（默认: clangd）'
     )
     
+    parser.add_argument(
+        '--trace',
+        help='使用历史追踪结果："list"显示历史记录，或指定文件名直接使用该追踪结果'
+    )
+    
     return parser.parse_args()
 
 
@@ -266,11 +272,65 @@ def list_vulnerability_types(project_type: str, attack_surface: str):
         console.print(f"[yellow]暂无 {project_type} {attack_surface} 的漏洞类型配置[/yellow]")
 
 
+def list_trace_results():
+    """
+    列出报告目录中的追踪结果文件
+    """
+    reports_dir = os.path.join(os.path.dirname(__file__), 'code_audit_agent', 'reports')
+    
+    if not os.path.exists(reports_dir):
+        console.print("[yellow]报告目录不存在，暂无追踪结果[/yellow]")
+        return
+    
+    trace_files = []
+    for filename in os.listdir(reports_dir):
+        if filename.startswith('trace_results_') and filename.endswith('.json'):
+            file_path = os.path.join(reports_dir, filename)
+            file_stat = os.stat(file_path)
+            trace_files.append({
+                'filename': filename,
+                'filepath': file_path,
+                'size': file_stat.st_size,
+                'modified': datetime.fromtimestamp(file_stat.st_mtime)
+            })
+    
+    if not trace_files:
+        console.print("[yellow]暂无追踪结果文件[/yellow]")
+        return
+    
+    # 按修改时间排序
+    trace_files.sort(key=lambda x: x['modified'], reverse=True)
+    
+    table = Table(title="历史追踪结果文件", box=box.ROUNDED)
+    table.add_column("序号", style="cyan", justify="right")
+    table.add_column("文件名", style="green")
+    table.add_column("大小", style="yellow")
+    table.add_column("修改时间", style="blue")
+    
+    for i, trace_file in enumerate(trace_files, 1):
+        table.add_row(
+            str(i),
+            trace_file['filename'],
+            f"{trace_file['size']} bytes",
+            trace_file['modified'].strftime('%Y-%m-%d %H:%M:%S')
+        )
+    
+    console.print(table)
+    console.print("\n[bold]使用方法:[/bold]")
+    console.print("  python main.py <project_type> <attack_surface> <code_dir> --trace <文件名>")
+    console.print("  例如: python main.py c civetweb /path/to/code --trace trace_results_20260226_154943.json")
+
+
 def main():
     """
     主函数
     """
     args = parse_arguments()
+    
+    # 处理 --trace list 选项（独立功能）
+    if args.trace and args.trace.lower() == 'list':
+        list_trace_results()
+        sys.exit(0)
     
     if args.project_type == 'list':
         list_project_types()
@@ -354,110 +414,164 @@ def main():
         console.print("[yellow]未发现任何接口函数，审计结束[/yellow]")
         sys.exit(0)
     
-    console.print()
-    console.print(Panel("[bold yellow]步骤 2: 追踪外部输入数据流...[/bold yellow]", box=box.SIMPLE, padding=(0, 1)))
-    
-    try:
-        trace_agent = TraceAgent(
-            llm_client=llm_client,
-            max_workers=args.max_workers,
-            enable_lsp=args.enable_lsp,
-            project_type=project_type,
-            attack_surface=attack_surface,
-            code_dir=code_dir
-        )
-        
-        
-        trace_results = trace_agent.trace_functions_concurrent(functions)
-        complete_traces = trace_agent.get_complete_traces_only(trace_results)
+    # 处理 --trace 选项（使用指定文件）
+    if args.trace:
+            # 使用指定的追踪结果文件
+            reports_dir = os.path.join(os.path.dirname(__file__), 'code_audit_agent', 'reports')
+            trace_file_path = os.path.join(reports_dir, args.trace)
+            
+            if not os.path.exists(trace_file_path):
+                console.print(f"[bold red]错误: 追踪结果文件不存在: {trace_file_path}[/bold red]")
+                sys.exit(1)
+            
+            try:
+                trace_agent = TraceAgent(
+                    llm_client=llm_client,
+                    max_workers=args.max_workers,
+                    enable_lsp=args.enable_lsp,
+                    project_type=project_type,
+                    attack_surface=attack_surface,
+                    code_dir=code_dir
+                )
+                
+                console.print(f"[bold yellow]步骤 2: 从文件加载追踪结果...[/bold yellow]")
+                trace_results = trace_agent.load_trace_results(trace_file_path)
+                complete_traces = trace_agent.get_complete_traces_only(trace_results)
+                
+                console.print(f"[green]✓ 已从文件加载 {len(trace_results)} 个追踪结果，其中 {len(complete_traces)} 个完成[/green]")
+                
+                # 跳过追踪步骤，直接进入步骤3
+                console.print()
+                console.print(Panel("[bold yellow]步骤 3: 创建审计任务...[/bold yellow]", box=box.SIMPLE, padding=(0, 1)))
+                
+                try:
+                    audit_agent = AuditAgent(llm_client=llm_client, max_workers=args.max_workers, attack_surface=attack_surface, project_type=project_type, debug=args.debug, code_dir=code_dir)
+                    audit_tasks = audit_agent.create_audit_tasks_with_trace(complete_traces)    
+                    
+                    console.print(f"[green]创建了 {len(audit_tasks)} 个审计任务[/green]")
+                except Exception as e:
+                    #打印调用栈
+                    import traceback
+                    traceback.print_exc()
+                    console.print(f"[bold red]错误: 创建审计任务失败: {str(e)}[/bold red]")
+                    sys.exit(1)
+                
+                # 继续执行后续步骤
+                
+            except Exception as e:
+                console.print(f"[bold red]错误: 加载追踪结果失败: {str(e)}[/bold red]")
+                sys.exit(1)
+    else:
+        # 正常执行追踪步骤
+        console.print()
+        console.print(Panel("[bold yellow]步骤 2: 追踪外部输入数据流...[/bold yellow]", box=box.SIMPLE, padding=(0, 1)))
         
         try:
-            report_path = trace_agent.generate_trace_report(trace_results)
-            console.print(f"[green]✓ 追踪报告已生成: {report_path}[/green]")
+            trace_agent = TraceAgent(
+                llm_client=llm_client,
+                max_workers=args.max_workers,
+                enable_lsp=args.enable_lsp,
+                project_type=project_type,
+                attack_surface=attack_surface,
+                code_dir=code_dir
+            )
+            
+            trace_results = trace_agent.trace_functions_concurrent(functions)
+            complete_traces = trace_agent.get_complete_traces_only(trace_results)
+            
+            # 保存追踪结果到文件
+            try:
+                trace_agent.save_trace_results(trace_results)
+            except Exception as e:
+                console.print(f"[yellow]⚠ 追踪结果保存失败: {str(e)}[/yellow]")
+            
+            try:
+                report_path = trace_agent.generate_trace_report(trace_results)
+                console.print(f"[green]✓ 追踪报告已生成: {report_path}[/green]")
+            except Exception as e:
+                console.print(f"[yellow]⚠ 追踪报告生成失败: {str(e)}[/yellow]")
+            
+            if args.debug:
+                console.print()
+                console.print(Panel("[bold magenta]调试信息 - 追踪结果 (Trace Results)[/bold magenta]", box=box.ROUNDED, padding=(0, 1)))
+                
+                for i, trace_result in enumerate(trace_results, 1):
+                    status_style = "green" if trace_result.trace_complete else "red"
+                    status_text = "完成" if trace_result.trace_complete else "失败"
+                    
+                    table = Table(title=f"[追踪结果 {i}/{len(trace_results)}]", box=box.SIMPLE, show_header=True, header_style="bold cyan")
+                    table.add_column("属性", style="cyan", width=15)
+                    table.add_column("值", style="white")
+                    
+                    table.add_row("任务ID", trace_result.task_id)
+                    table.add_row("文件路径", trace_result.function_info.file_path)
+                    table.add_row("函数名", trace_result.function_info.function_name)
+                    table.add_row("项目类型", trace_result.project_type)
+                    table.add_row("攻击面", trace_result.attack_surface)
+                    table.add_row("追踪状态", f"[{status_style}]{status_text}[/{status_style}]")
+                    
+                    if trace_result.error_message:
+                        table.add_row("错误信息", f"[red]{trace_result.error_message}[/red]")
+                    
+                    table.add_row("代码逻辑", trace_result.code_logic)
+                    table.add_row("代码地图条目数", str(len(trace_result.code_map)))
+                    
+                    console.print(table)
+                    
+                    if trace_result.code_map:
+                        code_map_table = Table(title="代码地图详情", box=box.SIMPLE, show_header=True, header_style="bold yellow")
+                        code_map_table.add_column("序号", style="cyan", width=6)
+                        code_map_table.add_column("文件路径", style="blue")
+                        code_map_table.add_column("行号", style="yellow")
+                        code_map_table.add_column("上下文类型", style="green")
+                        
+                        for j, code_context in enumerate(trace_result.code_map, 1):
+                            code_map_table.add_row(
+                                str(j),
+                                code_context.file_path,
+                                f"{code_context.line_start}-{code_context.line_end}",
+                                code_context.context_type
+                            )
+                        
+                        console.print(code_map_table)
+                    
+                    if i < len(trace_results):
+                        console.print()
+                
+                console.print()
+            
         except Exception as e:
-            console.print(f"[yellow]⚠ 追踪报告生成失败: {str(e)}[/yellow]")
-        
-        if args.debug:
-            console.print()
-            console.print(Panel("[bold magenta]调试信息 - 追踪结果 (Trace Results)[/bold magenta]", box=box.ROUNDED, padding=(0, 1)))
-            
-            for i, trace_result in enumerate(trace_results, 1):
-                status_style = "green" if trace_result.trace_complete else "red"
-                status_text = "完成" if trace_result.trace_complete else "失败"
-                
-                table = Table(title=f"[追踪结果 {i}/{len(trace_results)}]", box=box.SIMPLE, show_header=True, header_style="bold cyan")
-                table.add_column("属性", style="cyan", width=15)
-                table.add_column("值", style="white")
-                
-                table.add_row("任务ID", trace_result.task_id)
-                table.add_row("文件路径", trace_result.function_info.file_path)
-                table.add_row("函数名", trace_result.function_info.function_name)
-                table.add_row("项目类型", trace_result.project_type)
-                table.add_row("攻击面", trace_result.attack_surface)
-                table.add_row("追踪状态", f"[{status_style}]{status_text}[/{status_style}]")
-                
-                if trace_result.error_message:
-                    table.add_row("错误信息", f"[red]{trace_result.error_message}[/red]")
-                
-                table.add_row("代码逻辑", trace_result.code_logic)
-                table.add_row("代码地图条目数", str(len(trace_result.code_map)))
-                
-                console.print(table)
-                
-                if trace_result.code_map:
-                    code_map_table = Table(title="代码地图详情", box=box.SIMPLE, show_header=True, header_style="bold yellow")
-                    code_map_table.add_column("序号", style="cyan", width=6)
-                    code_map_table.add_column("文件路径", style="blue")
-                    code_map_table.add_column("行号", style="yellow")
-                    code_map_table.add_column("上下文类型", style="green")
-                    
-                    for j, code_context in enumerate(trace_result.code_map, 1):
-                        code_map_table.add_row(
-                            str(j),
-                            code_context.file_path,
-                            f"{code_context.line_start}-{code_context.line_end}",
-                            code_context.context_type
-                        )
-                    
-                    console.print(code_map_table)
-                
-                if i < len(trace_results):
-                    console.print()
-            
-            console.print()
-        
-        
-    except Exception as e:
-        # 捕获并打印追踪失败的详细信息
-        for trace_result in trace_results:
-            console.print(f"[red]  函数 {trace_result.function_info.file_path}:追踪失败: {trace_result.error_message}[/red]")  
+            # 捕获并打印追踪失败的详细信息
+            if 'trace_results' in locals():
+                for trace_result in trace_results:
+                    console.print(f"[red]  函数 {trace_result.function_info.file_path}:追踪失败: {trace_result.error_message}[/red]")  
 
-        console.print(f"[bold red]错误: 追踪失败: {str(e)}[/bold red]")
-        sys.exit(1)
-    
-    if not complete_traces:
-        console.print("[yellow]未完成任何追踪，审计结束[/yellow]")
-        sys.exit(0)
-    
-    exit(0)
-    console.print()
-    console.print(Panel("[bold yellow]步骤 3: 创建审计任务...[/bold yellow]", box=box.SIMPLE, padding=(0, 1)))
-    
-    try:
-        audit_agent = AuditAgent(llm_client=llm_client, max_workers=args.max_workers)
-        audit_tasks = audit_agent.create_audit_tasks_with_trace(complete_traces, args.project_type)
+            console.print(f"[bold red]错误: 追踪失败: {str(e)}[/bold red]")
+            sys.exit(1)
         
-        console.print(f"[green]创建了 {len(audit_tasks)} 个审计任务[/green]")
-    except Exception as e:
-        console.print(f"[bold red]错误: 创建审计任务失败: {str(e)}[/bold red]")
-        sys.exit(1)
+        if not complete_traces:
+            console.print("[yellow]未完成任何追踪，审计结束[/yellow]")
+            sys.exit(0)
+        
+        # 继续执行后续步骤
+        console.print()
+        console.print(Panel("[bold yellow]步骤 3: 创建审计任务...[/bold yellow]", box=box.SIMPLE, padding=(0, 1)))
+        
+        try:
+            audit_agent = AuditAgent(llm_client=llm_client, max_workers=args.max_workers, attack_surface=args.attack_surface, project_type=args.project_type, debug=args.debug, code_dir=code_dir)
+            audit_tasks = audit_agent.create_audit_tasks_with_trace(complete_traces)
+            
+            console.print(f"[green]创建了 {len(audit_tasks)} 个审计任务[/green]")
+        except Exception as e:
+            console.print(f"[bold red]错误: 创建审计任务失败: {str(e)}[/bold red]")
+            sys.exit(1)
     
     console.print()
     console.print(Panel("[bold yellow]步骤 4: 并发审计函数...[/bold yellow]", box=box.SIMPLE, padding=(0, 1)))
     
     try:
         trace_results_map = {
-            f"{trace.function_info.file_path}:{trace.function_info.function_name}:{trace.function_info.line_start}": trace
+            f"{trace.function_info.file_path}:{trace.function_info.function_name}": trace
             for trace in complete_traces
         }
         
@@ -490,6 +604,14 @@ def main():
             
             console.print(table)
     except Exception as e:
+        # 捕获并打印审计失败的详细信息
+        if 'audit_results' in locals():
+            for audit_result in audit_results:
+                console.print(f"[red]  函数 {audit_result.function_info.file_path}:审计失败: {audit_result.error_message}[/red]")
+        #打印错误调用栈
+        import traceback
+        traceback.print_exc()
+
         console.print(f"[bold red]错误: 审计失败: {str(e)}[/bold red]")
         sys.exit(1)
     
@@ -504,7 +626,7 @@ def main():
         console.print(Panel("[bold yellow]步骤 5: 漏洞利用...[/bold yellow]", box=box.SIMPLE, padding=(0, 1)))
         
         try:
-            exploit_agent = ExploitAgent(llm_client=llm_client)
+            exploit_agent = ExploitAgent(llm_client=llm_client, debug=args.debug)
             
             for i, audit_result in enumerate(vulnerabilities, 1):
                 console.print(f"尝试利用漏洞 [cyan]{i}/{len(vulnerabilities)}[/cyan]: [red]{audit_result.vulnerability_type}[/red]")

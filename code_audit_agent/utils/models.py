@@ -24,6 +24,7 @@ class AuditResult:
     task_id: str
     has_vulnerability: bool
     function_info: FunctionInfo
+    trace_result: TraceResult
     vulnerability_type: Optional[str] = None
     severity: Optional[str] = None
     description: Optional[str] = None

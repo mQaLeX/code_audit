@@ -261,14 +261,26 @@ class CodeEnvironment:
             
             file_path = parts[0].strip()
             line = int(parts[1].strip())
-            character = int(parts[2].strip())
-            
+            character = parts[2].strip()
             if self.code_dir and not os.path.isabs(file_path):
                 file_path = os.path.join(self.code_dir, file_path)
             file_full_path = os.path.abspath(file_path)
+            #打开对应文件和行号，看符号具体是在多少列
+            with open(file_full_path, 'r', encoding='utf-8', errors='ignore') as f:
+                lines = f.readlines()
+                print(f"文件总共有{len(lines)}行")
+                if line > len(lines):
+                    return {"error": "行号超出文件范围", "done": False}
+                line_content = lines[line-1]
+                character = line_content.find(symbol)
+                print(f"{line_content}")
+                if character == -1:
+                    return {"error": "符号未找到:"+line_content, "done": False}
+            
+
             
             self.lsp_client.open_document(file_full_path)
-            references = self.lsp_client.get_references(file_full_path, line, character)
+            references = self.lsp_client.get_references(file_full_path, line, character+1)
             
             if not references:
                 return {"error": "未找到引用", "done": False}

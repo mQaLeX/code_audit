@@ -65,7 +65,6 @@ class ReportAgent:
             report_lines.append(f"\n### 漏洞路径")
             report_lines.append(f"\n**文件**: `{result.audit_result.function_info.file_path}`")
             report_lines.append(f"\n**函数**: `{result.audit_result.function_info.function_name}`")
-            report_lines.append(f"\n**行号**: {result.audit_result.function_info.line_start}-{result.audit_result.function_info.line_end}")
             
             report_lines.append(f"\n### 漏洞详情")
             report_lines.append(f"\n**严重程度**: {result.audit_result.severity}")
@@ -159,7 +158,16 @@ class ReportAgent:
 请生成详细的漏洞影响描述。"""
 
         try:
-            return self.llm_client.generate_with_system_prompt(system_prompt, user_prompt, temperature=0.7)
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ]
+            response = self.llm_client.client.chat.completions.create(
+                model=self.llm_client.model,
+                messages=messages,
+                temperature=0.7,
+            )
+            return response.choices[0].message.content
         except Exception as e:
             return f"无法生成影响描述: {str(e)}"
 
