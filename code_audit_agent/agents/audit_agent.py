@@ -436,3 +436,236 @@ class AuditAgent:
         只返回有漏洞的结果
         """
         return [r for r in results if r.has_vulnerability]
+
+    def save_audit_results(self, results: List[AuditResult], attack_surface: str) -> str:
+        """
+        保存审计结果到 JSON 文件
+        """
+        import json
+        from datetime import datetime
+        
+        reports_dir = os.path.join(os.path.dirname(__file__), "..", "reports")
+        os.makedirs(reports_dir, exist_ok=True)
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"audit_results_{attack_surface}_{timestamp}.json"
+        filepath = os.path.join(reports_dir, filename)
+        
+        data = {
+            "timestamp": timestamp,
+            "attack_surface": attack_surface,
+            "total_results": len(results),
+            "vulnerabilities": [self._audit_result_to_dict(r) for r in results]
+        }
+        
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        
+        print(f"审计结果已保存: {filepath}")
+        return filepath
+
+    def load_audit_results(self, filepath: str) -> List[AuditResult]:
+        """
+        从 JSON 文件加载审计结果
+        """
+        import json
+        
+        with open(filepath, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        results = []
+        for vuln_data in data.get("vulnerabilities", []):
+            result = self._dict_to_audit_result(vuln_data)
+            results.append(result)
+        
+        return results
+
+    def _audit_result_to_dict(self, result: AuditResult) -> dict:
+        """
+        将 AuditResult 转换为字典
+        """
+        return {
+            "task_id": result.task_id,
+            "has_vulnerability": result.has_vulnerability,
+            "vulnerability_type": result.vulnerability_type,
+            "severity": result.severity,
+            "description": result.description,
+            "evidence": result.evidence,
+            "suggested_fix": result.suggested_fix,
+            "confidence": result.confidence,
+            "function_info": {
+                "file_path": result.function_info.file_path,
+                "function_name": result.function_info.function_name,
+                "code_snippet": result.function_info.code_snippet,
+            } if result.function_info else None,
+            "trace_result": {
+                "code_logic": result.trace_result.code_logic if result.trace_result else None,
+                "code_map": [
+                    {
+                        "file_path": cm.file_path,
+                        "line_start": cm.line_start,
+                        "line_end": cm.line_end,
+                        "code_snippet": cm.code_snippet,
+                        "context_type": cm.context_type
+                    }
+                    for cm in result.trace_result.code_map
+                ] if result.trace_result and result.trace_result.code_map else []
+            } if result.trace_result else None
+        }
+
+    def _dict_to_audit_result(self, data: dict) -> AuditResult:
+        """
+        将字典转换为 AuditResult
+        """
+        from ..utils.models import FunctionInfo, TraceResult, CodeContext
+        
+        func_info_data = data.get("function_info", {})
+        function_info = FunctionInfo(
+            file_path=func_info_data.get("file_path", ""),
+            function_name=func_info_data.get("function_name", ""),
+            line_start=func_info_data.get("line_start", 0),
+            line_end=func_info_data.get("line_end", 0),
+            code_snippet=func_info_data.get("code_snippet", "")
+        )
+        
+        trace_result_data = data.get("trace_result", {})
+        code_map = []
+        for cm_data in trace_result_data.get("code_map", []):
+            code_map.append(CodeContext(
+                file_path=cm_data.get("file_path", ""),
+                line_start=cm_data.get("line_start", 0),
+                line_end=cm_data.get("line_end", 0),
+                code_snippet=cm_data.get("code_snippet", ""),
+                context_type=cm_data.get("context_type", "function")
+            ))
+        
+        trace_result = TraceResult(
+            task_id=data.get("task_id", ""),
+            function_info=function_info,
+            attack_surface="",
+            project_type="",
+            code_logic=trace_result_data.get("code_logic", ""),
+            trace_complete=True,
+            error_message=None,
+            code_map=code_map,
+            full_msg=""
+        )
+        
+        return AuditResult(
+            task_id=data.get("task_id", ""),
+            has_vulnerability=data.get("has_vulnerability", False),
+            function_info=function_info,
+            trace_result=trace_result,
+            vulnerability_type=data.get("vulnerability_type"),
+            severity=data.get("severity"),
+            description=data.get("description"),
+            evidence=data.get("evidence"),
+            suggested_fix=data.get("suggested_fix"),
+            confidence=data.get("confidence", 0.0)
+        )
+
+    def generate_audit_html_report(self, results: List[AuditResult], attack_surface: str, code_dir: str) -> str:
+        """
+        生成审计结果的 HTML 报告
+        """
+        from datetime import datetime
+        
+        reports_dir = os.path.join(os.path.dirname(__file__), "..", "reports")
+        os.makedirs(reports_dir, exist_ok=True)
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"audit_report_{attack_surface}_{timestamp}.html"
+        filepath = os.path.join(reports_dir, filename)
+        
+        vulnerabilities = [r for r in results if r.has_vulnerability]
+        
+        html = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>代码安全审计报告 - {attack_surface}</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; margin: 0; padding: 20px; background-color: #f5f5f5; }}
+        .container {{ max-width: 1200px; margin: 0 auto; background-color: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
+        h1 {{ color: #333; border-bottom: 3px solid #4CAF50; padding-bottom: 10px; }}
+        h2 {{ color: #555; border-bottom: 2px solid #ddd; padding-bottom: 5px; margin-top: 30px; }}
+        h3 {{ color: #666; }}
+        .metadata {{ background-color: #f9f9f9; padding: 15px; border-radius: 5px; margin-bottom: 20px; }}
+        .vulnerability {{ border: 1px solid #ddd; border-radius: 5px; padding: 20px; margin-bottom: 20px; }}
+        .vulnerability.severe {{ border-left: 5px solid #f44336; }}
+        .vulnerability.high {{ border-left: 5px solid #ff9800; }}
+        .vulnerability.medium {{ border-left: 5px solid #ffeb3b; }}
+        .vulnerability.low {{ border-left: 5px solid #4CAF50; }}
+        pre {{ background-color: #f5f5f5; padding: 15px; border-radius: 5px; overflow-x: auto; }}
+        code {{ background-color: #f5f5f5; padding: 2px 5px; border-radius: 3px; }}
+        .summary {{ background-color: #e3f2fd; padding: 20px; border-radius: 5px; margin-top: 30px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>代码安全审计报告</h1>
+        
+        <div class="metadata">
+            <p><strong>生成时间</strong>: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+            <p><strong>审计目录</strong>: {code_dir}</p>
+            <p><strong>攻击面</strong>: {attack_surface}</p>
+            <p><strong>审计函数总数</strong>: {len(results)}</p>
+            <p><strong>发现漏洞数量</strong>: {len(vulnerabilities)}</p>
+        </div>
+"""
+        
+        if not vulnerabilities:
+            html += """
+        <div class="summary">
+            <h2>审计结果</h2>
+            <p>未发现安全漏洞。</p>
+        </div>
+"""
+        else:
+            for i, result in enumerate(vulnerabilities, 1):
+                severity_class = {
+                    "Critical": "severe",
+                    "High": "high", 
+                    "Medium": "medium",
+                    "Low": "low"
+                }.get(result.severity, "medium")
+                
+                html += f"""
+        <div class="vulnerability {severity_class}">
+            <h2>{i}. {result.vulnerability_type or '未知漏洞'}</h2>
+            
+            <h3>漏洞路径</h3>
+            <p><strong>文件</strong>: <code>{result.function_info.file_path}</code></p>
+            <p><strong>函数</strong>: <code>{result.function_info.function_name}</code></p>
+            
+            <h3>漏洞详情</h3>
+            <p><strong>严重程度</strong>: {result.severity}</p>
+            <p><strong>置信度</strong>: {result.confidence:.2f}</p>
+            <p><strong>描述</strong>: {result.description}</p>
+"""
+                if result.evidence:
+                    html += f"""
+            <p><strong>证据</strong>:</p>
+            <pre><code>{result.evidence}</code></pre>
+"""
+                if result.suggested_fix:
+                    html += f"""
+            <p><strong>建议修复</strong>:</p>
+            <pre><code>{result.suggested_fix}</code></pre>
+"""
+                html += """
+        </div>
+"""
+        
+        html += """
+    </div>
+</body>
+</html>
+"""
+        
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write(html)
+        
+        print(f"HTML报告已生成: {filepath}")
+        return filepath

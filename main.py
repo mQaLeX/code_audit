@@ -200,6 +200,11 @@ def parse_arguments():
         help='使用历史追踪结果："list"显示历史记录，或指定文件名直接使用该追踪结果'
     )
     
+    parser.add_argument(
+        '--audit',
+        help='使用历史审计结果："list"显示历史记录，或指定文件名直接使用该审计结果进行后续步骤（漏洞利用和报告生成）'
+    )
+    
     return parser.parse_args()
 
 
@@ -298,7 +303,6 @@ def list_trace_results():
         console.print("[yellow]暂无追踪结果文件[/yellow]")
         return
     
-    # 按修改时间排序
     trace_files.sort(key=lambda x: x['modified'], reverse=True)
     
     table = Table(title="历史追踪结果文件", box=box.ROUNDED)
@@ -321,6 +325,54 @@ def list_trace_results():
     console.print("  例如: python main.py c civetweb /path/to/code --trace trace_results_20260226_154943.json")
 
 
+def list_audit_results():
+    """
+    列出报告目录中的审计结果文件
+    """
+    reports_dir = os.path.join(os.path.dirname(__file__), 'code_audit_agent', 'reports')
+    
+    if not os.path.exists(reports_dir):
+        console.print("[yellow]报告目录不存在，暂无审计结果[/yellow]")
+        return
+    
+    audit_files = []
+    for filename in os.listdir(reports_dir):
+        if filename.startswith('audit_results_') and filename.endswith('.json'):
+            file_path = os.path.join(reports_dir, filename)
+            file_stat = os.stat(file_path)
+            audit_files.append({
+                'filename': filename,
+                'filepath': file_path,
+                'size': file_stat.st_size,
+                'modified': datetime.fromtimestamp(file_stat.st_mtime)
+            })
+    
+    if not audit_files:
+        console.print("[yellow]暂无审计结果文件[/yellow]")
+        return
+    
+    audit_files.sort(key=lambda x: x['modified'], reverse=True)
+    
+    table = Table(title="历史审计结果文件", box=box.ROUNDED)
+    table.add_column("序号", style="cyan", justify="right")
+    table.add_column("文件名", style="green")
+    table.add_column("大小", style="yellow")
+    table.add_column("修改时间", style="blue")
+    
+    for i, audit_file in enumerate(audit_files, 1):
+        table.add_row(
+            str(i),
+            audit_file['filename'],
+            f"{audit_file['size']} bytes",
+            audit_file['modified'].strftime('%Y-%m-%d %H:%M:%S')
+        )
+    
+    console.print(table)
+    console.print("\n[bold]使用方法:[/bold]")
+    console.print("  python main.py <project_type> <attack_surface> <code_dir> --audit <文件名>")
+    console.print("  例如: python main.py c civetweb /path/to/code --audit audit_results_20260226_154943.json")
+
+
 def main():
     """
     主函数
@@ -330,6 +382,11 @@ def main():
     # 处理 --trace list 选项（独立功能）
     if args.trace and args.trace.lower() == 'list':
         list_trace_results()
+        sys.exit(0)
+    
+    # 处理 --audit list 选项（独立功能）
+    if args.audit and args.audit.lower() == 'list':
+        list_audit_results()
         sys.exit(0)
     
     if args.project_type == 'list':
@@ -566,8 +623,36 @@ def main():
             console.print(f"[bold red]错误: 创建审计任务失败: {str(e)}[/bold red]")
             sys.exit(1)
     
-    console.print()
-    console.print(Panel("[bold yellow]步骤 4: 并发审计函数...[/bold yellow]", box=box.SIMPLE, padding=(0, 1)))
+    # 处理 --audit 选项（使用指定的审计结果文件）
+    if args.audit:
+        reports_dir = os.path.join(os.path.dirname(__file__), 'code_audit_agent', 'reports')
+        audit_file_path = os.path.join(reports_dir, args.audit)
+        
+        if not os.path.exists(audit_file_path):
+            console.print(f"[bold red]错误: 审计结果文件不存在: {audit_file_path}[/bold red]")
+            sys.exit(1)
+        
+        try:
+            console.print(f"[bold yellow]从文件加载审计结果...[/bold yellow]")
+            
+            audit_agent = AuditAgent(llm_client=llm_client, max_workers=args.max_workers, attack_surface=attack_surface, project_type=project_type, debug=args.debug, code_dir=code_dir)
+            audit_results = audit_agent.load_audit_results(audit_file_path)
+            vulnerabilities = audit_agent.get_vulnerabilities_only(audit_results)
+            
+            console.print(f"[green]✓ 已从文件加载 {len(audit_results)} 个审计结果，其中 {len(vulnerabilities)} 个包含漏洞[/green]")
+            
+            # 跳过追踪和审计步骤，直接进入漏洞利用
+            console.print()
+            console.print(Panel("[bold yellow]步骤 5: 漏洞利用...[/bold yellow]", box=box.SIMPLE, padding=(0, 1)))
+            
+        except Exception as e:
+            console.print(f"[bold red]错误: 加载审计结果失败: {str(e)}[/bold red]")
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
+    else:
+        console.print()
+        console.print(Panel("[bold yellow]步骤 4: 并发审计函数...[/bold yellow]", box=box.SIMPLE, padding=(0, 1)))
     
     try:
         trace_results_map = {
@@ -579,6 +664,20 @@ def main():
         vulnerabilities = audit_agent.get_vulnerabilities_only(audit_results)
         
         console.print(f"[green]审计完成，发现 {len(vulnerabilities)} 个潜在漏洞[/green]")
+        
+        # 保存审计结果到文件
+        try:
+            audit_result_path = audit_agent.save_audit_results(audit_results, attack_surface)
+            console.print(f"[green]✓ 审计结果已保存: {audit_result_path}[/green]")
+        except Exception as e:
+            console.print(f"[yellow]⚠ 审计结果保存失败: {str(e)}[/yellow]")
+        
+        # 生成审计 HTML 报告
+        try:
+            html_report_path = audit_agent.generate_audit_html_report(audit_results, attack_surface, code_dir)
+            console.print(f"[green]✓ 审计 HTML 报告已生成: {html_report_path}[/green]")
+        except Exception as e:
+            console.print(f"[yellow]⚠ 审计 HTML 报告生成失败: {str(e)}[/yellow]")
         
         if args.verbose:
             table = Table(show_header=True, header_style="bold magenta", box=box.SIMPLE)
