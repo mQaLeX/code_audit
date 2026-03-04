@@ -10,8 +10,10 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 from rich import box
+import traceback
 
 from code_audit_agent.utils import LLMClient
+from code_audit_agent.utils.config import get_config
 from code_audit_agent.scanners import FunctionScanner
 from code_audit_agent.agents import AuditAgent, ExploitAgent, ReportAgent, TraceAgent
 
@@ -73,139 +75,6 @@ def get_vulnerability_types(project_type: str, attack_surface: str):
     
     return sorted(vuln_types)
 
-
-def parse_arguments():
-    """
-    解析命令行参数
-    """
-    project_types = get_project_types()
-    all_attack_surfaces = set()
-    for pt in project_types:
-        all_attack_surfaces.update(get_attack_surfaces(pt))
-    all_attack_surfaces = sorted(all_attack_surfaces)
-    
-    parser = argparse.ArgumentParser(
-        description='基于LLM的代码审计AI Agent',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=f"""
-示例用法:
-  python main.py python web /path/to/code
-  python main.py python cli /path/to/code
-  python main.py python protobuf /path/to/code
-  python main.py python blink /path/to/code
-
-列表查询:
-  python main.py list                           # 查看支持的project_type
-  python main.py <project_type> list            # 查看指定project_type支持的attack_surface
-  python main.py <project_type> <attack_surface> list  # 查看支持的漏洞类型
-
-支持的项目类型: {', '.join(project_types)}
-支持的攻击面: {', '.join(all_attack_surfaces)}
-        """
-    )
-    
-    parser.add_argument(
-        'project_type',
-        nargs='?',
-        choices=project_types + ['list'],
-        help=f'项目类型（可选: {", ".join(project_types)}）'
-    )
-    
-    parser.add_argument(
-        'attack_surface',
-        nargs='?',
-        choices=all_attack_surfaces + ['list'],
-        help=f'攻击面类型（可选: {", ".join(all_attack_surfaces)}）'
-    )
-    
-    parser.add_argument(
-        'list_type',
-        nargs='?',
-        help='列表查询（用于查看漏洞类型，使用 "list" 查看漏洞类型列表）'
-    )
-    
-    parser.add_argument(
-        'code_dir',
-        nargs='?',
-        help='要审计的代码目录路径'
-    )
-    
-    parser.add_argument(
-        '--api-key',
-        help='OpenAI API密钥（如果不提供，将从环境变量OPENAI_API_KEY读取）'
-    )
-    
-    parser.add_argument(
-        '--base-url',
-        help='OpenAI API基础URL（如果不提供，将从环境变量OPENAI_BASE_URL读取）'
-    )
-    
-    parser.add_argument(
-        '--model',
-        help='使用的LLM模型（如果不提供，将从环境变量DEFAULT_MODEL读取）'
-    )
-    
-    parser.add_argument(
-        '--max-workers',
-        type=int,
-        default=1,
-        help='并发审计的最大工作线程数（默认: 1）'
-    )
-    
-    parser.add_argument(
-        '--output-dir',
-        help='报告输出目录（默认: ./reports）'
-    )
-    
-    parser.add_argument(
-        '--skip-exploit',
-        action='store_true',
-        help='跳过漏洞利用步骤，只进行审计'
-    )
-    
-    parser.add_argument(
-        '--report-format',
-        choices=['markdown', 'json', 'html', 'all'],
-        default='all',
-        help='报告格式（默认: all）'
-    )
-    
-    parser.add_argument(
-        '--verbose',
-        action='store_true',
-        help='显示详细输出'
-    )
-    
-    parser.add_argument(
-        '--debug',
-        action='store_true',
-        help='显示LLM客户端交互的消息内容'
-    )
-    
-    parser.add_argument(
-        '--enable-lsp',
-        action='store_true',
-        help='启用LSP（clangd）工具调用获取更多代码上下文'
-    )
-    
-    parser.add_argument(
-        '--lsp-command',
-        nargs='+',
-        default=['clangd'],
-        help='LSP服务器命令（默认: clangd）'
-    )
-    
-    parser.add_argument(
-        '--trace',
-        help='使用历史追踪结果："list"显示历史记录，或指定文件名直接使用该追踪结果'
-    )
-    
-    parser.add_argument(
-        '--audit',
-        help='使用历史审计结果："list"显示历史记录，或指定文件名直接使用该审计结果进行后续步骤（漏洞利用和报告生成）'
-    )
-    
-    return parser.parse_args()
 
 
 def validate_code_directory(code_dir: str) -> bool:
@@ -373,35 +242,90 @@ def list_audit_results():
     console.print("  例如: python main.py c civetweb /path/to/code --audit audit_results_20260226_154943.json")
 
 
+def list_exploit_results():
+    """
+    列出报告目录中的漏洞利用结果文件
+    """
+    reports_dir = os.path.join(os.path.dirname(__file__), 'code_audit_agent', 'reports')
+    
+    if not os.path.exists(reports_dir):
+        console.print("[yellow]报告目录不存在，暂无漏洞利用结果[/yellow]")
+        return
+    
+    exploit_files = []
+    for filename in os.listdir(reports_dir):
+        if filename.startswith('exploit_results_') and filename.endswith('.json'):
+            file_path = os.path.join(reports_dir, filename)
+            file_stat = os.stat(file_path)
+            exploit_files.append({
+                'filename': filename,
+                'filepath': file_path,
+                'size': file_stat.st_size,
+                'modified': datetime.fromtimestamp(file_stat.st_mtime)
+            })
+    
+    if not exploit_files:
+        console.print("[yellow]暂无漏洞利用结果文件[/yellow]")
+        return
+    
+    exploit_files.sort(key=lambda x: x['modified'], reverse=True)
+    
+    table = Table(title="历史漏洞利用结果文件", box=box.ROUNDED)
+    table.add_column("序号", style="cyan", justify="right")
+    table.add_column("文件名", style="green")
+    table.add_column("大小", style="yellow")
+    table.add_column("修改时间", style="blue")
+    
+    for i, exploit_file in enumerate(exploit_files, 1):
+        table.add_row(
+            str(i),
+            exploit_file['filename'],
+            f"{exploit_file['size']} bytes",
+            exploit_file['modified'].strftime('%Y-%m-%d %H:%M:%S')
+        )
+    
+    console.print(table)
+    console.print("\n[bold]使用方法:[/bold]")
+    console.print("  python main.py <project_type> <attack_surface> <code_dir> --exploit <文件名>")
+    console.print("  例如: python main.py c civetweb /path/to/code --exploit exploit_results_20260226_154943.json")
+
+
 def main():
     """
     主函数
     """
-    args = parse_arguments()
+    config = get_config()
     
     # 处理 --trace list 选项（独立功能）
-    if args.trace and args.trace.lower() == 'list':
+    if config.trace and config.trace.lower() == 'list':
         list_trace_results()
         sys.exit(0)
     
     # 处理 --audit list 选项（独立功能）
-    if args.audit and args.audit.lower() == 'list':
+    if config.audit and config.audit.lower() == 'list':
         list_audit_results()
         sys.exit(0)
     
-    if args.project_type == 'list':
+    # 处理 --exploit list 选项（独立功能）
+    if config.exploit and config.exploit.lower() == 'list':
+        list_exploit_results()
+        sys.exit(0)
+    
+    if config.project_type == 'list':
         list_project_types()
         sys.exit(0)
     
-    if args.attack_surface == 'list':
-        list_attack_surfaces(args.project_type)
+    if config.attack_surface == 'list':
+        list_attack_surfaces(config.project_type)
         sys.exit(0)
     
-    if args.list_type == 'list':
-        list_vulnerability_types(args.project_type, args.attack_surface)
+    if config.list_type == 'list':
+        list_vulnerability_types(config.project_type, config.attack_surface)
         sys.exit(0)
     
-    code_dir = args.code_dir if args.code_dir else args.list_type
+    code_dir = config.code_dir if config.code_dir else config.list_type
+    # 转换为绝对路径
+    code_dir = os.path.abspath(code_dir)
     
     if not code_dir:
         console.print("[bold red]错误: 请提供代码目录路径[/bold red]")
@@ -414,13 +338,12 @@ def main():
     
     panel = Panel(
         f"""[cyan]代码目录:[/cyan] {code_dir}
-[cyan]项目类型:[/cyan] {args.project_type}
-[cyan]攻击面:[/cyan] {args.attack_surface}
-[cyan]LLM模型:[/cyan] {args.model}
-[cyan]并发线程数:[/cyan] {args.max_workers}
-[cyan]跳过漏洞利用:[/cyan] {args.skip_exploit}
-[cyan]报告格式:[/cyan] {args.report_format}
-[cyan]调试模式:[/cyan] {args.debug}""",
+[cyan]项目类型:[/cyan] {config.project_type}
+[cyan]攻击面:[/cyan] {config.attack_surface}
+[cyan]LLM模型:[/cyan] {config.model}
+[cyan]并发线程数:[/cyan] {config.max_workers}
+[cyan]跳过漏洞利用:[/cyan] {config.skip_exploit}
+[cyan]调试模式:[/cyan] {config.debug}""",
         title="[bold blue]代码审计AI Agent[/bold blue]",
         border_style="blue",
         padding=(1, 2)
@@ -428,12 +351,169 @@ def main():
     console.print(panel)
     console.print()
     
+    # 如果使用 --audit 选项，直接从文件加载审计结果，跳过扫描和追踪步骤
+    if config.audit:
+        reports_dir = os.path.join(os.path.dirname(__file__), 'code_audit_agent', 'reports')
+        audit_file_path = os.path.join(reports_dir, config.audit)
+        
+        if not os.path.exists(audit_file_path):
+            console.print(f"[bold red]错误: 审计结果文件不存在: {audit_file_path}[/bold red]")
+            sys.exit(1)
+        
+        try:
+            llm_client = LLMClient(
+                api_key=config.api_key,
+                base_url=config.base_url,
+                model=config.model,
+                debug=config.debug
+            )
+            console.print("[green]✓ LLM客户端初始化成功[/green]")
+            
+            console.print(f"[bold yellow]从文件加载审计结果...[/bold yellow]")
+            
+            audit_agent = AuditAgent(llm_client=llm_client, max_workers=config.max_workers, attack_surface=config.attack_surface, project_type=config.project_type, code_dir=code_dir)
+            audit_results = audit_agent.load_audit_results(audit_file_path)
+            vulnerabilities = audit_agent.get_vulnerabilities_only(audit_results)
+            
+            console.print(f"[green]✓ 已从文件加载 {len(audit_results)} 个审计结果，其中 {len(vulnerabilities)} 个包含漏洞[/green]")
+            
+            if not vulnerabilities:
+                console.print("[yellow]未发现任何漏洞，审计结束[/yellow]")
+                sys.exit(0)
+            
+            exploit_results = []
+            
+            if not config.skip_exploit:
+                console.print()
+                console.print(Panel("[bold yellow]步骤 5: 漏洞利用...[/bold yellow]", box=box.SIMPLE, padding=(0, 1)))
+                
+                try:
+                    exploit_agent = ExploitAgent(llm_client=llm_client, code_dir=code_dir)
+                    
+                    for i, audit_result in enumerate(vulnerabilities, 1):
+                        console.print(f"尝试利用漏洞 [cyan]{i}/{len(vulnerabilities)}[/cyan]: [red]{audit_result.vulnerability_type}[/red]")
+                        
+                        function_code = audit_result.function_info.code_snippet
+                        exploit_result = exploit_agent.exploit_vulnerability(
+                            audit_result,
+                            function_code
+                        )
+                        
+                        exploit_results.append(exploit_result)
+                        
+                        if exploit_result.exploit_successful:
+                            console.print(f"  [green]✓ 漏洞利用成功[/green]")
+                        else:
+                            import traceback
+                            console.print(traceback.format_exc())
+                            console.print(f"  [red]✗ 漏洞利用失败: {exploit_result.error_message or '未知原因'}[/red]")
+                    
+                    successful_exploits = [r for r in exploit_results if r.exploit_successful]
+                    console.print(f"[green]漏洞利用完成，成功利用 {len(successful_exploits)}/{len(vulnerabilities)} 个漏洞[/green]")
+                    
+                    # 保存漏洞利用结果到文件
+                    try:
+                        exploit_result_path = exploit_agent.save_exploit_results(exploit_results)
+                        console.print(f"[green]✓ 漏洞利用结果已保存: {exploit_result_path}[/green]")
+                    except Exception as e:
+                        console.print(f"[yellow]⚠ 漏洞利用结果保存失败: {str(e)}[/yellow]")
+                except Exception as e:
+                    #打印调用栈
+                    import traceback
+                    traceback.print_exc()
+                    console.print(f"[bold red]错误: 漏洞利用失败: {str(e)}[/bold red]")
+                    exploit_results = []
+            else:
+                console.print("[yellow]跳过漏洞利用步骤[/yellow]")
+                exploit_results = []
+            
+            console.print()
+            console.print(Panel("[bold yellow]步骤 6: 生成报告...[/bold yellow]", box=box.SIMPLE, padding=(0, 1)))
+            
+            try:
+                report_agent = ReportAgent(llm_client=llm_client, output_dir=config.output_dir)
+                
+                report_path = report_agent.generate_report(exploit_results, code_dir, config.attack_surface)
+                console.print(f"[green]Markdown报告已生成: {report_path}[/green]")
+            except Exception as e:
+                console.print(f"[bold red]错误: 报告生成失败: {str(e)}[/bold red]")
+                sys.exit(1)
+            
+            console.print()
+            console.print(Panel("[bold green]审计完成！[/bold green]", box=box.DOUBLE, padding=(1, 3)))
+            sys.exit(0)
+            
+        except Exception as e:
+            console.print(f"[bold red]错误: 加载审计结果失败: {str(e)}[/bold red]")
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
+    
+    # 处理 --exploit 选项（直接使用漏洞利用结果生成报告）
+    if config.exploit and config.exploit.lower() != 'list':
+        exploit_file_path = config.exploit
+        
+        # 如果不是绝对路径，则在 reports 目录中查找
+        if not os.path.isabs(exploit_file_path):
+            reports_dir = os.path.join(os.path.dirname(__file__), 'code_audit_agent', 'reports')
+            potential_path = os.path.join(reports_dir, exploit_file_path)
+            if os.path.exists(potential_path):
+                exploit_file_path = potential_path
+        
+        # 检查文件是否存在
+        if not os.path.exists(exploit_file_path):
+            console.print(f"[bold red]错误: 漏洞利用结果文件不存在: {exploit_file_path}[/bold red]")
+            console.print("使用 --exploit list 查看可用的文件")
+            sys.exit(1)
+        
+        try:
+            llm_client = LLMClient(
+                api_key=config.api_key,
+                base_url=config.base_url,
+                model=config.model,
+                debug=config.debug
+            )
+            console.print("[green]✓ LLM客户端初始化成功[/green]")
+            
+            console.print(f"[bold yellow]从文件加载漏洞利用结果...[/bold yellow]")
+            
+            exploit_agent = ExploitAgent(llm_client=llm_client)
+            exploit_results = exploit_agent.load_exploit_results(exploit_file_path)
+            
+            console.print(f"[green]✓ 已从文件加载 {len(exploit_results)} 个漏洞利用结果[/green]")
+            
+            if not exploit_results:
+                console.print("[yellow]漏洞利用结果为空[/yellow]")
+                sys.exit(0)
+            
+            console.print()
+            console.print(Panel("[bold yellow]生成报告...[/bold yellow]", box=box.SIMPLE, padding=(0, 1)))
+            
+            try:
+                report_agent = ReportAgent(llm_client=llm_client, output_dir=config.output_dir)
+                
+                report_path = report_agent.generate_report(exploit_results, code_dir, config.attack_surface)
+                console.print(f"[green]Markdown报告已生成: {report_path}[/green]")
+            except Exception as e:
+                console.print(f"[bold red]错误: 报告生成失败: {str(e)}[/bold red]")
+                sys.exit(1)
+            
+            console.print()
+            console.print(Panel("[bold green]报告生成完成！[/bold green]", box=box.DOUBLE, padding=(1, 3)))
+            sys.exit(0)
+            
+        except Exception as e:
+            console.print(f"[bold red]错误: 加载漏洞利用结果失败: {str(e)}[/bold red]")
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
+    
     try:
         llm_client = LLMClient(
-            api_key=args.api_key,
-            base_url=args.base_url,
-            model=args.model,
-            debug=args.debug
+            api_key=config.api_key,
+            base_url=config.base_url,
+            model=config.model,
+            debug=config.debug
         )
         console.print("[green]✓ LLM客户端初始化成功[/green]")
     except Exception as e:
@@ -445,14 +525,14 @@ def main():
     
     try:
         scanner = FunctionScanner()
-        project_type = args.project_type
-        attack_surface = args.attack_surface
+        project_type = config.project_type
+        attack_surface = config.attack_surface
         
         functions = scanner.scan_functions(code_dir, project_type, attack_surface)
         
         console.print(f"[green]扫描完成，发现 {len(functions)} 个接口函数[/green]")
         
-        if args.verbose:
+        if config.verbose:
             table = Table(show_header=True, header_style="bold magenta", box=box.SIMPLE)
             table.add_column("序号", style="cyan", width=6)
             table.add_column("文件路径", style="blue")
@@ -472,10 +552,10 @@ def main():
         sys.exit(0)
     
     # 处理 --trace 选项（使用指定文件）
-    if args.trace:
+    if config.trace:
             # 使用指定的追踪结果文件
             reports_dir = os.path.join(os.path.dirname(__file__), 'code_audit_agent', 'reports')
-            trace_file_path = os.path.join(reports_dir, args.trace)
+            trace_file_path = os.path.join(reports_dir, config.trace)
             
             if not os.path.exists(trace_file_path):
                 console.print(f"[bold red]错误: 追踪结果文件不存在: {trace_file_path}[/bold red]")
@@ -484,8 +564,8 @@ def main():
             try:
                 trace_agent = TraceAgent(
                     llm_client=llm_client,
-                    max_workers=args.max_workers,
-                    enable_lsp=args.enable_lsp,
+                    max_workers=config.max_workers,
+                    enable_lsp=config.enable_lsp,
                     project_type=project_type,
                     attack_surface=attack_surface,
                     code_dir=code_dir
@@ -502,7 +582,7 @@ def main():
                 console.print(Panel("[bold yellow]步骤 3: 创建审计任务...[/bold yellow]", box=box.SIMPLE, padding=(0, 1)))
                 
                 try:
-                    audit_agent = AuditAgent(llm_client=llm_client, max_workers=args.max_workers, attack_surface=attack_surface, project_type=project_type, debug=args.debug, code_dir=code_dir)
+                    audit_agent = AuditAgent(llm_client=llm_client, max_workers=config.max_workers, attack_surface=attack_surface, project_type=project_type, code_dir=code_dir)
                     audit_tasks = audit_agent.create_audit_tasks_with_trace(complete_traces)    
                     
                     console.print(f"[green]创建了 {len(audit_tasks)} 个审计任务[/green]")
@@ -526,8 +606,8 @@ def main():
         try:
             trace_agent = TraceAgent(
                 llm_client=llm_client,
-                max_workers=args.max_workers,
-                enable_lsp=args.enable_lsp,
+                max_workers=config.max_workers,
+                enable_lsp=config.enable_lsp,
                 project_type=project_type,
                 attack_surface=attack_surface,
                 code_dir=code_dir
@@ -548,7 +628,7 @@ def main():
             except Exception as e:
                 console.print(f"[yellow]⚠ 追踪报告生成失败: {str(e)}[/yellow]")
             
-            if args.debug:
+            if config.debug:
                 console.print()
                 console.print(Panel("[bold magenta]调试信息 - 追踪结果 (Trace Results)[/bold magenta]", box=box.ROUNDED, padding=(0, 1)))
                 
@@ -615,7 +695,7 @@ def main():
         console.print(Panel("[bold yellow]步骤 3: 创建审计任务...[/bold yellow]", box=box.SIMPLE, padding=(0, 1)))
         
         try:
-            audit_agent = AuditAgent(llm_client=llm_client, max_workers=args.max_workers, attack_surface=args.attack_surface, project_type=args.project_type, debug=args.debug, code_dir=code_dir)
+            audit_agent = AuditAgent(llm_client=llm_client, max_workers=config.max_workers, attack_surface=config.attack_surface, project_type=config.project_type, code_dir=code_dir)
             audit_tasks = audit_agent.create_audit_tasks_with_trace(complete_traces)
             
             console.print(f"[green]创建了 {len(audit_tasks)} 个审计任务[/green]")
@@ -623,36 +703,8 @@ def main():
             console.print(f"[bold red]错误: 创建审计任务失败: {str(e)}[/bold red]")
             sys.exit(1)
     
-    # 处理 --audit 选项（使用指定的审计结果文件）
-    if args.audit:
-        reports_dir = os.path.join(os.path.dirname(__file__), 'code_audit_agent', 'reports')
-        audit_file_path = os.path.join(reports_dir, args.audit)
-        
-        if not os.path.exists(audit_file_path):
-            console.print(f"[bold red]错误: 审计结果文件不存在: {audit_file_path}[/bold red]")
-            sys.exit(1)
-        
-        try:
-            console.print(f"[bold yellow]从文件加载审计结果...[/bold yellow]")
-            
-            audit_agent = AuditAgent(llm_client=llm_client, max_workers=args.max_workers, attack_surface=attack_surface, project_type=project_type, debug=args.debug, code_dir=code_dir)
-            audit_results = audit_agent.load_audit_results(audit_file_path)
-            vulnerabilities = audit_agent.get_vulnerabilities_only(audit_results)
-            
-            console.print(f"[green]✓ 已从文件加载 {len(audit_results)} 个审计结果，其中 {len(vulnerabilities)} 个包含漏洞[/green]")
-            
-            # 跳过追踪和审计步骤，直接进入漏洞利用
-            console.print()
-            console.print(Panel("[bold yellow]步骤 5: 漏洞利用...[/bold yellow]", box=box.SIMPLE, padding=(0, 1)))
-            
-        except Exception as e:
-            console.print(f"[bold red]错误: 加载审计结果失败: {str(e)}[/bold red]")
-            import traceback
-            traceback.print_exc()
-            sys.exit(1)
-    else:
-        console.print()
-        console.print(Panel("[bold yellow]步骤 4: 并发审计函数...[/bold yellow]", box=box.SIMPLE, padding=(0, 1)))
+    console.print()
+    console.print(Panel("[bold yellow]步骤 4: 并发审计函数...[/bold yellow]", box=box.SIMPLE, padding=(0, 1)))
     
     try:
         trace_results_map = {
@@ -679,7 +731,7 @@ def main():
         except Exception as e:
             console.print(f"[yellow]⚠ 审计 HTML 报告生成失败: {str(e)}[/yellow]")
         
-        if args.verbose:
+        if config.verbose:
             table = Table(show_header=True, header_style="bold magenta", box=box.SIMPLE)
             table.add_column("序号", style="cyan", width=6)
             table.add_column("漏洞类型", style="red")
@@ -720,12 +772,12 @@ def main():
     
     exploit_results = []
     
-    if not args.skip_exploit:
+    if not config.skip_exploit:
         console.print()
         console.print(Panel("[bold yellow]步骤 5: 漏洞利用...[/bold yellow]", box=box.SIMPLE, padding=(0, 1)))
         
         try:
-            exploit_agent = ExploitAgent(llm_client=llm_client, debug=args.debug)
+            exploit_agent = ExploitAgent(llm_client=llm_client, code_dir=code_dir)
             
             for i, audit_result in enumerate(vulnerabilities, 1):
                 console.print(f"尝试利用漏洞 [cyan]{i}/{len(vulnerabilities)}[/cyan]: [red]{audit_result.vulnerability_type}[/red]")
@@ -733,8 +785,7 @@ def main():
                 function_code = audit_result.function_info.code_snippet
                 exploit_result = exploit_agent.exploit_vulnerability(
                     audit_result,
-                    function_code,
-                    attack_surface
+                    function_code
                 )
                 
                 exploit_results.append(exploit_result)
@@ -746,6 +797,13 @@ def main():
             
             successful_exploits = [r for r in exploit_results if r.exploit_successful]
             console.print(f"[green]漏洞利用完成，成功利用 {len(successful_exploits)}/{len(vulnerabilities)} 个漏洞[/green]")
+            
+            # 保存漏洞利用结果到文件
+            try:
+                exploit_result_path = exploit_agent.save_exploit_results(exploit_results)
+                console.print(f"[green]✓ 漏洞利用结果已保存: {exploit_result_path}[/green]")
+            except Exception as e:
+                console.print(f"[yellow]⚠ 漏洞利用结果保存失败: {str(e)}[/yellow]")
         except Exception as e:
             console.print(f"[bold red]错误: 漏洞利用失败: {str(e)}[/bold red]")
             exploit_results = []
@@ -757,20 +815,12 @@ def main():
     console.print(Panel("[bold yellow]步骤 6: 生成报告...[/bold yellow]", box=box.SIMPLE, padding=(0, 1)))
     
     try:
-        report_agent = ReportAgent(llm_client=llm_client, output_dir=args.output_dir)
+        report_agent = ReportAgent(llm_client=llm_client, output_dir=config.output_dir)
         
-        if args.report_format in ['markdown', 'all']:
-            report_path = report_agent.generate_report(exploit_results, code_dir, args.attack_surface)
-            console.print(f"[green]Markdown报告已生成: {report_path}[/green]")
-        
-        if args.report_format in ['json', 'all']:
-            report_path = report_agent.generate_json_report(exploit_results, code_dir, args.attack_surface)
-            console.print(f"[green]JSON报告已生成: {report_path}[/green]")
-        
-        if args.report_format in ['html', 'all']:
-            report_path = report_agent.generate_html_report(exploit_results, code_dir, args.attack_surface)
-            console.print(f"[green]HTML报告已生成: {report_path}[/green]")
+        report_path = report_agent.generate_report(exploit_results, code_dir, config.attack_surface)
+        console.print(f"[green]Markdown报告已生成: {report_path}[/green]")
     except Exception as e:
+        console.print(traceback.format_exc())
         console.print(f"[bold red]错误: 报告生成失败: {str(e)}[/bold red]")
         sys.exit(1)
     
@@ -779,4 +829,8 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        console.print("\n[bold yellow]程序已被用户中断[/bold yellow]")
+        sys.exit(130)

@@ -12,5 +12,6 @@ void send_error_response(struct mg_connection *conn, int code, const char *messa
 int check_file_exists(const char *filename);
 long get_file_size(const char *filename);
 int is_safe_path(const char *path);
+char *url_decode(const char *src);
 
 #endif

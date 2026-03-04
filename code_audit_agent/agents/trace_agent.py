@@ -1,5 +1,6 @@
 import os
 import json
+import trace
 import uuid
 import traceback
 from typing import List, Dict, Any, Optional, Set
@@ -12,6 +13,7 @@ from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.table import Table
 
+from ..utils.llm_response_parser import clean_and_parse
 from ..utils.models import (
     FunctionInfo,
     TraceResult,
@@ -78,156 +80,69 @@ class TraceAgent:
         ))
         
         for step in range(30):
-            user_message = f"当前环境反馈：\n{observation}\n\n下一步行动（只输出命令）："
-            messages.append({
-                "role": "user",
-                "content": user_message
-            })
-            
-            console.print(f"\n[bold magenta]━━━ Step {step} ━━━[/bold magenta]")
-            console.print(Panel(
-                user_message,
-                title="[bold]发送给 LLM[/bold]",
-                border_style="magenta",
-                expand=False
-            ))
             
             try:
-                response = self.llm_client.client.chat.completions.create(
-                    model=self.llm_client.model,
+                response_content = self.llm_client.chat(
+                    think=False,
                     messages=messages,
                     temperature=0,
+                    # response_format={
+                    #     "type": "json_object"
+                    # }
                 )
-                
-                choice = response.choices[0]
-                content = choice.message.content or ""
-                action = content.strip()
-                
-                console.print(Panel(
-                    action if action else "(空响应)",
-                    title=f"[bold]LLM 响应[/bold] (finish_reason: {choice.finish_reason})",
-                    border_style="green" if action else "red",
-                    expand=False
-                ))
-                
-                if not content or not content.strip():
-                    console.print(f"[dim]response.id: {response.id}[/dim]")
-                    console.print(f"[dim]response.model: {response.model}[/dim]")
-                    console.print(f"[dim]usage: prompt={response.usage.prompt_tokens}, completion={response.usage.completion_tokens}[/dim]")
-                    
-                    error_map = {
-                        "content_filter": "请求被安全过滤，请修改查询内容。",
-                        "length": "响应被截断，请简化请求。",
-                        "stop": "未收到有效命令，请重新尝试。"
-                    }
-                    error_msg = error_map.get(choice.finish_reason, f"未收到有效命令 (finish_reason: {choice.finish_reason})")
-                    console.print(f"[red]原因: {error_msg}[/red]")
-                    observation = error_msg
-                    
-                    messages.append({
-                        "role": "assistant",
-                        "content": ""
-                    })
+                try:
+                    json_response = clean_and_parse(response_content)
+                except json.JSONDecodeError:
+                    console.print(f"[bold red]Step {step} 解析 JSON 失败，进行下一轮请求看看还正常不[/bold red]")
                     continue
+                
                 
                 messages.append({
                     "role": "assistant",
-                    "content": action
+                    "content": response_content
                 })
                 
-                result = env.execute(action)
+                result = env.execute(json_response.get("action", ""))
                 observation = result.get("output", result.get("error", ""))
                 
                 console.print(Panel(
-                    observation[:1000] + ("..." if len(observation) > 1000 else ""),
-                    title="[bold]环境反馈[/bold]",
+                    observation,
+                    title="[bold]command output[/bold]",
                     border_style="yellow",
                     expand=False
                 ))
+                messages.append({
+                    "role": "user",
+                    "content": f"上一个命令的输出: {observation}"
+                })
                 
                 if result.get("done"):
                     console.print("\n[bold green]✓ 任务完成[/bold green]")
                     break
                     
             except Exception as e:
+                console.print(traceback.format_exc())
                 console.print(f"\n[bold red]Step {step} 异常:[/bold red] {str(e)}")
                 observation = f"执行失败: {str(e)}"
                 break
         
-        final_messages = messages.copy()
-        final_messages.append({
+        messages.append({
             "role": "user",
             "content": self._build_final_prompt()
         })
         
-        response_schema = {
-            "type": "object",
-            "properties": {
-                "code_logic": {
-                    "type": "string",
-                    "description": "数据流追踪结果的详细描述，包括入口函数、外部输入、被污染函数列表等"
-                },
-                "code_map": {
-                    "type": "array",
-                    "description": "被污染的函数代码上下文列表",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "file_path": {
-                                "type": "string",
-                                "description": "文件路径"
-                            },
-                            "line_start": {
-                                "type": "integer",
-                                "description": "起始行号"
-                            },
-                            "line_end": {
-                                "type": "integer",
-                                "description": "结束行号"
-                            },
-                            "code_snippet": {
-                                "type": "string",
-                                "description": "代码片段内容"
-                            },
-                            "context_type": {
-                                "type": "string",
-                                "description": "上下文类型，默认为function",
-                                "default": "function"
-                            }
-                        },
-                        "required": ["file_path", "line_start", "line_end", "code_snippet", "context_type"]
-                    }
-                }
-            },
-            "required": ["code_logic", "code_map"]
-        }
+        
         
         try:
-            if 'glm' in self.llm_client.model:
-                response = self.llm_client.client.chat.completions.create(
-                    model=self.llm_client.model,
-                    messages=final_messages,
-                    temperature=0,
-                    response_format={
-                        "type": "json_object"
-                    }
-                )
-            else:
-                response = self.llm_client.client.chat.completions.create(
-                    model=self.llm_client.model,
-                    messages=final_messages,
-                    temperature=0,
-                    response_format={
-                        "type": "json_schema",
-                        "json_schema": {
-                            "name": "trace_result",
-                            "strict": True,
-                            "schema": response_schema
-                        }
-                    }
-                )
+            response = self.llm_client.chat(
+                messages=messages,
+                temperature=0,
+                # response_format={
+                #     "type": "json_object"
+                # }
+            )
             
-            structured_response = json.loads(response.choices[0].message.content)
+            structured_response = clean_and_parse(response)
             
             code_map = []
             for item in structured_response.get("code_map", []):
@@ -248,7 +163,7 @@ class TraceAgent:
                 trace_complete=True,
                 error_message=None,
                 code_map=code_map,
-                full_msg=json.dumps(final_messages, ensure_ascii=False, indent=2)
+                full_msg=json.dumps(messages, ensure_ascii=False, indent=2)
             )
         except Exception as e:
             # 打印详细的错误信息和调用栈
@@ -340,6 +255,22 @@ class TraceAgent:
 5. 递归追踪直到没有新的函数被污染
 6. 使用 submit 提交最终结果
 7. 优先使用lsp工具获取准确定义和调用，次选文件打开和搜索
+
+## 输出要求
+
+你需要输出一个结构化的 JSON 对象，包含以下字段：
+
+1. action (string): 执行的操作，例如 "go_to_def"、"search"、"view" 等
+2. logic (string): 执行操作的详细逻辑描述，包括参数、调用顺序等
+
+## 输出示例
+
+```json
+{{
+    "action": "go_to_def main.c:11:handle_index",
+    "logic": "外部输入是xx，xx作为参数传递给handle_index函数，跳转到handle_index函数定义"
+}}
+```
 
 请开始追踪！"""
 

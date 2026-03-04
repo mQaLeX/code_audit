@@ -100,3 +100,32 @@ int is_safe_path(const char *path) {
     
     return 1;
 }
+
+char *url_decode(const char *src) {
+    if (!src) return NULL;
+    
+    size_t len = strlen(src);
+    char *dst = malloc(len + 1);
+    if (!dst) return NULL;
+    
+    size_t j = 0;
+    for (size_t i = 0; i < len; i++) {
+        if (src[i] == '%' && i + 2 < len) {
+            char hex[3] = {src[i + 1], src[i + 2], 0};
+            char *endptr;
+            int val = (int)strtol(hex, &endptr, 16);
+            if (*endptr == 0) {
+                dst[j++] = (char)val;
+                i += 2;
+                continue;
+            }
+        } else if (src[i] == '+') {
+            dst[j++] = ' ';
+        } else {
+            dst[j++] = src[i];
+        }
+    }
+    dst[j] = '\0';
+    
+    return dst;
+}

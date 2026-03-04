@@ -1,5 +1,6 @@
 import os
-import re
+import subprocess
+import sys
 from typing import Dict, Any, Optional
 from .lsp_client import LSPClient
 
@@ -40,14 +41,9 @@ class CodeEnvironment:
 - `open <file>[:start-end]` - 查看文件内容，默认显示100行
   例：open main.c:1-50
 
-- `view` - 重新查看当前打开的文件
-
 ### 代码搜索
-- `search <query>` - 在代码库中搜索
-  例：search validate_hostname
-
-- `search_file <query>` - 在当前文件中搜索
-  例：search_file TODO"""
+- `search <query>` - 使用 ripgrep 在代码库中搜索
+  例：search validate_hostname"""
         
         if self._lsp_available:
             prompt += """
@@ -107,10 +103,6 @@ class CodeEnvironment:
             return self._cmd_find_refs(action[10:].strip())
         elif action.startswith("search "):
             return self._cmd_search(action[7:].strip())
-        elif action.startswith("search_file "):
-            return self._cmd_search_file(action[11:].strip())
-        elif action == "view":
-            return self._cmd_view()
         elif action == "submit":
             return {"done": True, "output": "任务完成"}
         else:
@@ -156,19 +148,6 @@ class CodeEnvironment:
         except Exception as e:
             return {"error": f"打开文件失败: {str(e)}", "done": False}
     
-    def _cmd_view(self) -> Dict[str, Any]:
-        """重新查看当前文件"""
-        if not self.current_file:
-            return {"error": "没有打开的文件", "done": False}
-        
-        display_end = min(self.current_end, len(self.current_lines))
-        output = f"文件: {self.current_file}\n"
-        output += f"显示行: {self.current_start}-{display_end}\n\n"
-        for i, line in enumerate(self.current_lines[self.current_start-1:display_end], start=self.current_start):
-            output += f"{i:6d} | {line}"
-        
-        return {"done": False, "output": output}
-    
     def _cmd_goto(self, args: str) -> Dict[str, Any]:
         """跳转到指定位置查看定义 输入为 main.c:2:validate_hostname"""
         if not self.lsp_client:
@@ -188,18 +167,15 @@ class CodeEnvironment:
             line = int(parts[1].strip())
             symbol = parts[2].strip()
             character = -1
-            #打开对应文件和行号，看符号具体是在多少列
+            
             with open(file_full_path, 'r', encoding='utf-8', errors='ignore') as f:
                 lines = f.readlines()
-                print(f"文件总共有{len(lines)}行")
                 if line > len(lines):
                     return {"error": "行号超出文件范围", "done": False}
                 line_content = lines[line-1]
                 character = line_content.find(symbol)
-                print(f"{line_content}")
                 if character == -1:
-                    return {"error": "符号未找到:"+line_content, "done": False}
-
+                    return {"error": f"符号 '{symbol}' 未找到: {line_content.strip()}", "done": False}
             
             self.lsp_client.open_document(file_full_path)
             definitions = self.lsp_client.get_definition(file_full_path, line, character+1)
@@ -240,7 +216,11 @@ class CodeEnvironment:
                     if found_start_brace and brace_count == 0:
                         break
                 
-                code_snippet = ''.join(f"{i+start_line-1:6d} | {line}" for i, line in enumerate(lines[start_line-1:actual_end_line]))
+                code_snippet = ''.join(f"{i+start_line:6d} | {line}" for i, line in enumerate(lines[start_line-1:actual_end_line]))
+            
+            # 定义位置显示相对路径
+            if self.code_dir and def_file_path.startswith(self.code_dir):
+                def_file_path = def_file_path[len(self.code_dir)+1:]
             
             output = f"定义位置: {def_file_path}:{start_line}-{actual_end_line}\n\n"
             output += code_snippet
@@ -257,27 +237,23 @@ class CodeEnvironment:
         try:
             parts = args.split(":")
             if len(parts) != 3:
-                return {"error": "格式错误，应为: file:line:col", "done": False}
+                return {"error": "格式错误，应为: file:line:symbol", "done": False}
             
             file_path = parts[0].strip()
             line = int(parts[1].strip())
-            character = parts[2].strip()
+            symbol = parts[2].strip()
             if self.code_dir and not os.path.isabs(file_path):
                 file_path = os.path.join(self.code_dir, file_path)
             file_full_path = os.path.abspath(file_path)
-            #打开对应文件和行号，看符号具体是在多少列
+            
             with open(file_full_path, 'r', encoding='utf-8', errors='ignore') as f:
                 lines = f.readlines()
-                print(f"文件总共有{len(lines)}行")
                 if line > len(lines):
                     return {"error": "行号超出文件范围", "done": False}
                 line_content = lines[line-1]
                 character = line_content.find(symbol)
-                print(f"{line_content}")
                 if character == -1:
-                    return {"error": "符号未找到:"+line_content, "done": False}
-            
-
+                    return {"error": f"符号 '{symbol}' 未找到: {line_content.strip()}", "done": False}
             
             self.lsp_client.open_document(file_full_path)
             references = self.lsp_client.get_references(file_full_path, line, character+1)
@@ -302,80 +278,44 @@ class CodeEnvironment:
             return {"error": f"查找引用失败: {str(e)}", "done": False}
     
     def _cmd_search(self, query: str) -> Dict[str, Any]:
-        """在代码库中搜索"""
+        """使用 ripgrep 在代码库中搜索"""
         if not self.code_dir:
             return {"error": "代码目录未设置", "done": False}
         
         try:
-            from pathlib import Path
+            cmd = [
+                "rg",
+                "-n",
+                "--max-count=20",
+                "-g", "!{node_modules,.git,__pycache__,build,dist,.venv,venv,target,bin,obj}",
+                "-g", "*.{c,h,cpp,hpp,cc,cxx,py,js,ts,java,go,rs,rb,php}",
+                query,
+                self.code_dir
+            ]
             
-            results = []
-            max_results = 10
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
             
-            for file_path in Path(self.code_dir).rglob("*.c"):
-                if len(results) >= max_results:
-                    break
-                
-                try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        lines = f.readlines()
-                    
-                    for i, line in enumerate(lines, 1):
-                        if re.search(query, line, re.IGNORECASE):
-                            start_line = max(1, i - 3)
-                            end_line = min(len(lines), i + 3)
-                            code_snippet = ''.join(lines[start_line-1:end_line])
-                            
-                            results.append({
-                                "file_path": str(file_path),
-                                "line_start": start_line,
-                                "line_end": end_line,
-                                "code_snippet": code_snippet,
-                                "match_line": i,
-                                "match_content": line.strip()
-                            })
-                            
-                            if len(results) >= max_results:
-                                break
-                except Exception:
-                    continue
+            if result.returncode not in (0, 1):
+                return {"error": f"搜索失败: {result.stderr}", "done": False}
             
-            output = f"搜索 '{query}' 找到 {len(results)} 个结果:\n\n"
-            for i, result in enumerate(results, 1):
-                output += f"{i}. {result['file_path']}:{result['match_line']}\n"
-                output += f"   {result['match_content']}\n\n"
+            lines = result.stdout.strip().split("\n") if result.stdout.strip() else []
+            
+            if not lines:
+                return {"done": False, "output": f"搜索 '{query}' 未找到结果"}
+            
+            output = f"搜索 '{query}' 找到 {len(lines)} 个结果:\n\n"
+            for i, line in enumerate(lines, 1):
+                output += f"{i}. {line}\n"
             
             return {"done": False, "output": output}
+        except subprocess.TimeoutExpired:
+            return {"error": "搜索超时", "done": False}
+        except FileNotFoundError:
+            return {"error": "ripgrep (rg) 未安装，请先安装: brew install ripgrep", "done": False}
         except Exception as e:
             return {"error": f"搜索失败: {str(e)}", "done": False}
-    
-    def _cmd_search_file(self, query: str) -> Dict[str, Any]:
-        """在当前文件中搜索"""
-        if not self.current_file:
-            return {"error": "没有打开的文件", "done": False}
-        
-        try:
-            results = []
-            
-            for i, line in enumerate(self.current_lines, 1):
-                if re.search(query, line, re.IGNORECASE):
-                    start_line = max(1, i - 3)
-                    end_line = min(len(self.current_lines), i + 3)
-                    code_snippet = ''.join(self.current_lines[start_line-1:end_line])
-                    
-                    results.append({
-                        "line_start": start_line,
-                        "line_end": end_line,
-                        "code_snippet": code_snippet,
-                        "match_line": i,
-                        "match_content": line.strip()
-                    })
-            
-            output = f"在当前文件中搜索 '{query}' 找到 {len(results)} 个结果:\n\n"
-            for i, result in enumerate(results, 1):
-                output += f"{i}. 行 {result['match_line']}\n"
-                output += f"   {result['match_content']}\n\n"
-            
-            return {"done": False, "output": output}
-        except Exception as e:
-            return {"error": f"搜索文件失败: {str(e)}", "done": False}

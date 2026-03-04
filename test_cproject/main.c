@@ -44,6 +44,13 @@ static int handle_ping(struct mg_connection *conn, void *cbdata) {
                 i++;
             }
             host[i] = '\0';
+            
+            char *decoded = url_decode(host);
+            if (decoded) {
+                strncpy(host, decoded, sizeof(host) - 1);
+                host[sizeof(host) - 1] = '\0';
+                free(decoded);
+            }
         }
     }
     
@@ -95,6 +102,13 @@ static int handle_read(struct mg_connection *conn, void *cbdata) {
                 i++;
             }
             file[i] = '\0';
+            
+            char *decoded = url_decode(file);
+            if (decoded) {
+                strncpy(file, decoded, sizeof(file) - 1);
+                file[sizeof(file) - 1] = '\0';
+                free(decoded);
+            }
         }
     }
     
@@ -153,6 +167,13 @@ static int handle_exec(struct mg_connection *conn, void *cbdata) {
                 i++;
             }
             cmd[i] = '\0';
+            
+            char *decoded = url_decode(cmd);
+            if (decoded) {
+                strncpy(cmd, decoded, sizeof(cmd) - 1);
+                cmd[sizeof(cmd) - 1] = '\0';
+                free(decoded);
+            }
         }
     }
     
@@ -174,7 +195,7 @@ static int handle_exec(struct mg_connection *conn, void *cbdata) {
     char buffer[1024];
     size_t nread;
     
-    mg_send_http_ok(conn, "text/plain", 0);
+    mg_send_http_ok(conn, "text/plain", -1);
     mg_printf(conn, "Executed command: %s\n\n", cmd);
     
     while ((nread = fread(buffer, 1, sizeof(buffer), pipe)) > 0) {

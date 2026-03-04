@@ -13,18 +13,21 @@ from ..utils.models import (
 )
 from ..utils.llm_client import LLMClient
 from ..utils.code_environment import CodeEnvironment
+from ..utils.llm_response_parser import clean_and_parse
 import traceback
+from ..utils.config import get_config
 console = Console()
+config = get_config()
 
 
 
 class AuditAgent:
-    def __init__(self, llm_client: LLMClient, max_workers: int = 5, attack_surface: str = "", project_type: str = "", debug: bool = False, code_dir: str = ""):
+    def __init__(self, llm_client: LLMClient, max_workers: int = 5, attack_surface: str = "", project_type: str = "", code_dir: str = ""):
         self.llm_client = llm_client
         self.max_workers = max_workers
         self.attack_surface = attack_surface
         self.project_type = project_type
-        self.debug = debug
+        self.debug = config.debug
         self.code_dir = code_dir
         self.code_environment = CodeEnvironment(code_dir)
 
@@ -167,10 +170,25 @@ class AuditAgent:
 {tools_prompt}
 
 重要：
-1. 在完成漏洞判断之前，你可以使用工具来获取更多上下文
+1. 在完成漏洞判断之前，你可以使用工具来获取更多上下文，但是注意仅追踪初始给出的数据流路径（外部输入 → 污染变量 → 函数调用），不要歪到其他不相关的数据或函数
 2. 当你有足够信息判断是否存在漏洞时，使用 `submit` 命令提交结果
 3. 提交结果必须包含完整的审计结论，不要在提交后继续分析
 
+## 输出要求
+
+你需要输出一个结构化的 JSON 对象，包含以下字段：
+
+1. action (string): 执行的操作，例如 "go_to_def"、"search"、"view"、"submit" 等
+2. logic (string): 执行操作的详细逻辑描述，包括参数、调用顺序、分析思路等
+
+## 输出示例
+
+```json
+{{
+    "action": "go_to_def main.c:11:handle_index",
+    "logic": "外部输入是xx，xx作为参数传递给handle_index函数，跳转到handle_index函数定义查看具体实现"
+}}
+```
 
 如果没有发现漏洞，has_vulnerability设为false，其他字段可以为null。"""
 
@@ -217,7 +235,9 @@ class AuditAgent:
 
         user_prompt += """
 
-请开始审计。并响应下一步行动，你应该输出命令。"""
+请开始审计。并响应下一步行动，你应该输出包含 action 和 logic 的 JSON。
+
+"""
 
         return [
             {"role": "system", "content": system_prompt},
@@ -238,10 +258,6 @@ class AuditAgent:
 
         return result.get("output", "")
 
-    def _is_submit_command(self, message: str) -> bool:
-        """检查消息是否包含 submit 命令"""
-        return "submit" in message.strip().lower().split() and message.strip().lower().startswith("submit")
-
     def _generate_audit_result(self, messages: List[Dict[str, Any]], task: AuditTask) -> Dict[str, Any]:
         """在检测到 submit 后，单独调用 LLM 生成审计结果"""
         result_prompt = """请根据之前的对话上下文，生成最终的审计结果。
@@ -259,21 +275,19 @@ class AuditAgent:
 
 如果没有发现漏洞，has_vulnerability设为false，其他字段可以为null。
 
-只返回JSON，不要包含其他内容。"""
+只返回JSON，不要用markdown渲染。"""
 
         result_messages = messages + [{"role": "user", "content": result_prompt}]
 
         self._debug_print("调用 LLM 生成最终审计结果")
 
         try:
-            response = self.llm_client.client.chat.completions.create(
-                model=self.llm_client.model,
+
+            response_content = self.llm_client.chat(
                 messages=result_messages,
                 temperature=0,
+                #response_format={"type": "json_object"},
             )
-            response_content = response.choices[0].message.content
-
-            self._debug_print(f"审计结果响应长度: {len(response_content)} 字符")
 
             return self._parse_audit_response(response_content)
         except Exception as e:
@@ -306,16 +320,34 @@ class AuditAgent:
                 current_turn += 1
                 self._debug_print(f"第 {current_turn} 轮对话")
 
-                response = self.llm_client.client.chat.completions.create(
-                    model=self.llm_client.model,
+
+                response_content = self.llm_client.chat(
                     messages=messages,
                     temperature=0,
                 )
-                response_content = response.choices[0].message.content
+                
+                
 
                 self._debug_print(f"LLM 响应长度: {len(response_content)} 字符")
 
-                if self._is_submit_command(response_content):
+                try:
+                    json_response = clean_and_parse(response_content)
+                except json.JSONDecodeError:
+                    self._debug_print(f"第 {current_turn} 轮解析 JSON 失败，继续下一轮")
+                    continue
+
+                messages.append({
+                    "role": "assistant",
+                    "content": response_content
+                })
+
+                action = json_response.get("action", "")
+                
+                if not action:
+                    self._debug_print("未找到 action 字段，跳过")
+                    continue
+
+                if "submit" in action.lower():
                     self._debug_print("检测到 submit 命令，生成审计结果")
 
                     result_dict = self._generate_audit_result(messages, task)
@@ -333,30 +365,14 @@ class AuditAgent:
                         confidence=result_dict.get("confidence", 0.0)
                     )
 
-                messages.append({"role": "assistant", "content": response_content})
-
-                command_lines = response_content.strip().split('\n')
-                tool_responses = []
-
-                for line in command_lines:
-                    line = line.strip()
-                    if line and (line.startswith("open ") or line.startswith("go_to_def ") or
-                                 line.startswith("find_refs ") or line.startswith("search ") or
-                                 line.startswith("search_file ") or line == "view"):
-                        self._debug_print(f"执行工具命令: {line}")
-                        tool_result = self._execute_aci_command(line)
-                        tool_responses.append(f"命令: {line}\n结果:\n{tool_result}")
-
-                if tool_responses:
-                    messages.append({
-                        "role": "user",
-                        "content": "工具执行结果:\n\n" + "\n\n".join(tool_responses)
-                    })
-                    self._debug_print(f"添加了 {len(tool_responses)} 个工具响应到对话中")
-                else:
-                    if current_turn >= 3:
-                        self._debug_print("多轮对话已达最大轮次，强制提交空结果")
-                        break
+                self._debug_print(f"执行工具命令: {action}")
+                tool_result = self._execute_aci_command(action)
+                
+                messages.append({
+                    "role": "user",
+                    "content": f"工具执行结果:\n{tool_result}"
+                })
+                self._debug_print("添加工具响应到对话中")
 
             self._debug_print("达到最大轮次或无法判断漏洞，返回无漏洞结果")
             return AuditResult(
@@ -523,8 +539,6 @@ class AuditAgent:
         function_info = FunctionInfo(
             file_path=func_info_data.get("file_path", ""),
             function_name=func_info_data.get("function_name", ""),
-            line_start=func_info_data.get("line_start", 0),
-            line_end=func_info_data.get("line_end", 0),
             code_snippet=func_info_data.get("code_snippet", "")
         )
         
