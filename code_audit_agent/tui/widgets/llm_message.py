@@ -8,7 +8,7 @@ from typing import Optional
 class LLMMessage(Static):
     """LLM消息组件"""
     
-    collapsed: Reactive[bool] = Reactive(True)
+    collapsed: Reactive[bool] = Reactive(False)
     
     def __init__(self, role: str, content: str, id: Optional[str] = None):
         super().__init__(id=id)

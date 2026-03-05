@@ -1,0 +1,29 @@
+缓冲区溢出
+检查代码中是否存在缓冲区溢出漏洞。Web服务器处理HTTP请求时，缓冲区溢出是常见且严重的安全问题。
+
+具体审计要点：
+- 检查strcpy、strcat、sprintf、gets等危险函数的使用
+- 分析字符串操作是否进行了边界检查
+- 验证动态内存分配是否充足
+- 检查数组访问是否越界
+- 分析结构体成员的大小是否正确处理
+
+常见漏洞模式：
+- strcpy(buffer, user_input); // 无边界检查
+- sprintf(buf, "%s", input); // 可能溢出
+- memcpy(dst, src, size); // size可控可能导致溢出
+- strncpy(dst, src, n); // 未正确处理n和null终止符
+- 数组下标可被用户控制导致越界
+
+CivetWeb特定场景：
+- HTTP头部长度处理不当
+- URL路径复制时缓冲区不足
+- Cookie值复制时未限制长度
+- 文件上传时缓冲区分配不足
+- JSON/表单解析时缓冲区溢出
+
+修复建议方向：
+- 使用安全替代函数（strncpy, snprintf, strlcpy等）
+- 始终指定目标缓冲区大小
+- 使用动态缓冲区或安全的字符串库
+- 启用编译器堆栈保护（-fstack-protector）

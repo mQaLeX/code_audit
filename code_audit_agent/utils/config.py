@@ -190,11 +190,27 @@ class Config:
             help='使用历史漏洞利用结果："list"显示历史记录，或指定文件名直接使用该利用结果进行报告生成'
         )
         
+        parser.add_argument(
+            '--list',
+            choices=['sessions', 'trace', 'audit', 'exploit'],
+            help='列出历史会话或结果文件: sessions-历史会话, trace-追踪结果, audit-审计结果, exploit-利用结果'
+        )
+        
+        parser.add_argument(
+            '--session',
+            help='指定会话ID来恢复历史会话（查看: python main.py --list sessions)'
+        )
+        
+        parser.add_argument(
+            '--from-stage',
+            choices=['scanner', 'trace', 'audit', 'exploit', 'report'],
+            help='从指定阶段开始执行（跳过前面阶段）'
+        )
+        
         args = parser.parse_args()
         
         self.project_type = args.project_type
         self.attack_surface = args.attack_surface
-        self.list_type = args.list_type
         self.code_dir = args.code_dir
         self.api_key = args.api_key or os.getenv('OPENAI_API_KEY')
         self.base_url = args.base_url or os.getenv('OPENAI_BASE_URL')
@@ -209,6 +225,9 @@ class Config:
         self.trace = args.trace
         self.audit = args.audit
         self.exploit = args.exploit
+        self.session_id = args.session
+        self.from_stage = args.from_stage
+        self.list_type = args.list or getattr(args, 'list_type', None)
         self.raw_args = args
         self.env_loaded = _env_loaded
         self.dotenv_path = str(_dotenv_path) if _dotenv_path else None

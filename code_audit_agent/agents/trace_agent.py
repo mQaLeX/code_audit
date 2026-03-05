@@ -27,7 +27,7 @@ console = Console()
 
 
 class TraceAgent:
-    def __init__(self, llm_client: LLMClient, max_workers: int = 5, enable_lsp: bool = False, code_dir: str = None, project_type: Optional[str] = None, attack_surface: Optional[str] = None):
+    def __init__(self, llm_client: LLMClient, max_workers: int = 1, enable_lsp: bool = False, code_dir: str = None, project_type: Optional[str] = None, attack_surface: Optional[str] = None):
         self.llm_client = llm_client
         self.max_workers = max_workers
         self.enable_lsp = enable_lsp

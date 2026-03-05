@@ -1,29 +1,37 @@
 """LLM消息容器"""
 
-from textual.widgets import Static, RichLog
-from textual.containers import Container, Vertical
+from textual.widgets import Static
+from textual.containers import Container, Vertical, ScrollableContainer
 from typing import List, Optional
 from ..widgets.llm_message import LLMMessage
 
 
-class MessageLog(RichLog):
+class MessageLog(ScrollableContainer):
     """消息日志组件，支持流式显示"""
     
     def __init__(self, id: str = "message_log"):
         super().__init__(id=id)
-        self.write_only = True
-        self.auto_scroll = True
+        self.messages: List[LLMMessage] = []
     
     def add_message(self, role: str, content: str) -> LLMMessage:
         """添加消息"""
         msg = LLMMessage(role=role, content=content)
-        self.write(msg)
+        self.messages.append(msg)
+        self.mount(msg)
+        self.scroll_end()
         return msg
     
     def update_message(self, msg: LLMMessage, new_content: str):
         """更新消息内容（流式更新）"""
-        # 这里需要实现流式更新逻辑
-        pass
+        msg.content = new_content
+        content_widget = msg.query_one("#message_content", Static)
+        content_widget.update(new_content)
+    
+    def clear(self):
+        """清空所有消息"""
+        for msg in self.messages:
+            msg.remove()
+        self.messages = []
 
 
 class MessageContainer(Container):
@@ -43,7 +51,7 @@ class MessageContainer(Container):
         """添加用户消息"""
         msg = LLMMessage(role="user", content=content)
         self.messages.append(msg)
-        self.query_one("#messages_log", MessageLog).write(msg)
+        self.query_one("#messages_log", MessageLog).mount(msg)
         self.current_message = None
     
     def add_assistant_message_start(self) -> LLMMessage:
@@ -51,16 +59,15 @@ class MessageContainer(Container):
         msg = LLMMessage(role="assistant", content="")
         self.messages.append(msg)
         self.current_message = msg
-        # 先添加一个折叠的容器
-        self.query_one("#messages_log", MessageLog).write(msg)
+        self.query_one("#messages_log", MessageLog).mount(msg)
         return msg
     
     def update_assistant_message(self, content: str):
         """更新AI消息内容（流式）"""
         if self.current_message:
             self.current_message.content += content
-            # 更新显示
-            self.query_one("#messages_log", MessageLog).write(content, end="")
+            content_widget = self.current_message.query_one("#message_content", Static)
+            content_widget.update(content)
     
     def complete_assistant_message(self):
         """完成AI消息，自动折叠"""

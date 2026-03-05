@@ -1,0 +1,30 @@
+空指针解引用
+检查代码中是否存在空指针解引用漏洞。空指针解引用可能导致程序崩溃（DoS）或在某些情况下可被利用。
+
+具体审计要点：
+- 检查返回值是否经过NULL检查后再使用
+- 分析内存分配失败后的处理
+- 验证函数参数是否进行了NULL检查
+- 检查指针释放后是否置为NULL
+- 分析条件判断中的指针有效性
+
+常见漏洞模式：
+- strcpy(dest, src); // src可能为NULL
+- ptr->field; // 未检查ptr是否为NULL
+- strlen(str); // str可能为NULL导致崩溃
+- free(ptr); ptr->data; // use-after-free与空指针结合
+- function(ptr); // ptr未验证直接传递
+
+CivetWeb特定场景：
+- mg_get_header返回NULL后直接使用
+- mg_get_request_info返回NULL未检查
+- 文件上传结构体成员NULL解引用
+- HTTP连接处理时NULL指针解引用
+- 回调函数中指针未验证
+
+修复建议方向：
+- 始终检查指针使用前是否为NULL
+- 使用断言确保关键指针非NULL
+- 在解引用前进行明确的NULL检查
+- 内存分配失败时进行适当的错误处理
+- 释放内存后将指针置为NULL

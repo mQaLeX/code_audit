@@ -1,13 +1,15 @@
 import os
 import signal
+import threading
 import time
-from typing import Optional
+from typing import Optional, Callable
 from openai import OpenAI, RateLimitError
 from .config import get_config
 config = get_config()
 
 _interrupted = False
 _current_response = None
+_signal_setup = False
 
 def _signal_handler(signum, frame):
     global _interrupted, _current_response
@@ -20,7 +22,14 @@ def _signal_handler(signum, frame):
             pass
     raise KeyboardInterrupt("用户中断")
 
-signal.signal(signal.SIGINT, _signal_handler)
+def _setup_signal():
+    """只在主线程中设置信号处理器"""
+    global _signal_setup
+    if _signal_setup:
+        return
+    if threading.current_thread() == threading.main_thread():
+        signal.signal(signal.SIGINT, _signal_handler)
+        _signal_setup = True
 
 
 class LLMClient:
@@ -31,6 +40,7 @@ class LLMClient:
         self.debug = debug
         self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
         self._cancelled = False
+        _setup_signal()
         print(f"初始化 LLMClient: 模型={self.model}, 调试={self.debug}, 基础URL={self.base_url}")
     
     def cancel(self):
@@ -41,11 +51,29 @@ class LLMClient:
         return _interrupted
 
 
-    def chat(self, think: bool = True, max_retries: int = 3, **kwargs):
+    def chat(self, think: bool = True, max_retries: int = 3, 
+             on_chunk: Callable[[str, str], None] = None,
+             on_reasoning: Callable[[str], None] = None,
+             **kwargs):
+        """
+        流式聊天接口
+        
+        Args:
+            think: 是否启用思考模式
+            max_retries: 最大重试次数
+            on_chunk: 内容块回调函数，签名: callback(content: str, full_content: str) -> None
+            on_reasoning: 思考内容回调函数，签名: callback(reasoning: str) -> None
+            **kwargs: 传递给 OpenAI API 的其他参数
+        
+        Returns:
+            完整的响应内容字符串
+        """
         global _interrupted, _current_response
         _interrupted = False
         self._cancelled = False
         _current_response = None
+        
+        full_content = ""
         
         last_error = None
         for attempt in range(max_retries):
@@ -72,46 +100,47 @@ class LLMClient:
                 )
                 _current_response = response
                 
-                if config.debug:
-                    full_content = ""
-                    try:
-                        if self.debug:
-                            first_reasoning = True
-                            first_content = True
-                            for chunk in response:
-                                if _interrupted or self._cancelled:
-                                    print("\n请求已取消")
-                                    return None
-                                
-                                delta = chunk.choices[0].delta
-                                
-                                reasoning_content = getattr(delta, 'reasoning_content', None) or getattr(delta, 'reasoning', None)
-                                if reasoning_content:
-                                    prefix = "\n🤔 " if first_reasoning else ""
-                                    print(f"{prefix}{reasoning_content}", end="", flush=True)
-                                    first_reasoning = False
-                                
-                                content = getattr(delta, 'content', None)
-                                if content:
-                                    full_content += content
-                                    prefix = "\n📝 " if first_content else ""
-                                    print(f"{prefix}{content}", end="", flush=True)
-                                    first_content = False
-                            print()
-                        else:
-                            for chunk in response:
-                                if _interrupted or self._cancelled:
-                                    print("\n请求已取消")
-                                    return None
-                                
-                                delta = chunk.choices[0].delta
-                                content = getattr(delta, 'content', None)
-                                if content:
-                                    full_content += content
-                    finally:
-                        _current_response = None
+                first_reasoning = True
+                first_content = True
+                
+                for chunk in response:
+                    if _interrupted or self._cancelled:
+                        print("\n请求已取消")
+                        return None
                     
-                    return full_content
+                    delta = chunk.choices[0].delta
+                    
+                    reasoning_content = getattr(delta, 'reasoning_content', None) or getattr(delta, 'reasoning', None)
+                    if reasoning_content:
+                        prefix = "\n🤔 " if first_reasoning else ""
+                        reasoning_text = f"{prefix}{reasoning_content}"
+                        
+                        if on_reasoning:
+                            on_reasoning(reasoning_text)
+                        
+                        if self.debug:
+                            print(reasoning_text, end="", flush=True)
+                        
+                        first_reasoning = False
+                    
+                    content = getattr(delta, 'content', None)
+                    if content:
+                        full_content += content
+                        prefix = "\n📝 " if first_content else ""
+                        
+                        if on_chunk:
+                            on_chunk(content, full_content)
+                        
+                        if self.debug:
+                            print(f"{prefix}{content}", end="", flush=True)
+                        
+                        first_content = False
+                
+                if self.debug:
+                    print()
+                
+                _current_response = None
+                return full_content
                     
             except KeyboardInterrupt:
                 print("\n请求已取消")

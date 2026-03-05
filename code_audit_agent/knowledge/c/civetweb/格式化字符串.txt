@@ -1,0 +1,27 @@
+格式化字符串
+检查代码中是否存在格式化字符串漏洞。攻击者可以利用格式化函数泄露敏感信息或写入任意内存位置。
+
+具体审计要点：
+- 检查printf、fprintf、sprintf、snprintf等格式化函数的使用
+- 分析格式化字符串是否由用户输入直接控制
+- 验证是否使用了正确的参数传递方式
+- 检查是否存在printf(user_input)这样的危险用法
+- 分析日志输出是否安全
+
+常见漏洞模式：
+- printf(user_input); // 危险：用户输入作为格式化字符串
+- sprintf(buf, user_input, ...); // 危险
+- fprintf(fp, user_input); // 危险
+- syslog(LOG_INFO, user_input); // 危险：syslog使用用户输入作为格式化字符串
+
+CivetWeb特定场景：
+- 错误消息直接使用用户输入打印
+- 日志记录时使用用户可控的字符串
+- 调试输出泄露服务器内部信息
+- HTTP响应中直接嵌入用户输入到格式化函数
+
+修复建议方向：
+- 始终使用printf("%s", user_input)而非printf(user_input)
+- 使用fprintf(fp, "%s", str)而非fprintf(fp, str)
+- 对用户输入进行适当的转义或过滤
+- 使用安全的日志记录API
