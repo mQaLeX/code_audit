@@ -29,7 +29,7 @@ FetchContent_MakeAvailable(civetweb)
 include_directories(${civetweb_SOURCE_DIR}/include)
 
 # 添加可执行文件
-add_executable(test_cproject main.c utils.c)
+add_executable(test_cproject main.c utils.c index.c cmd_injection.c file_read.c format_string.c memory_leak.c null_pointer.c race_condition.c use_after_free.c info_leak.c dos.c)
 
 # 直接编译civetweb源文件
 target_sources(test_cproject PRIVATE

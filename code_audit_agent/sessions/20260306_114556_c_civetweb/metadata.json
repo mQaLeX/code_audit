@@ -1,0 +1,12 @@
+{
+  "session_id": "20260306_114556_c_civetweb",
+  "project_type": "c",
+  "attack_surface": "civetweb",
+  "code_dir": "/Users/lometsj/Documents/llm_tool/code_audit/test_cproject",
+  "created_at": "2026-03-06T11:45:56.188670",
+  "completed_stages": [
+    "scanner",
+    "trace"
+  ],
+  "last_updated": "2026-03-06T13:10:02.984797"
+}

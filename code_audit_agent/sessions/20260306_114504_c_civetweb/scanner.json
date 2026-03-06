@@ -1,0 +1,72 @@
+[
+  {
+    "file_path": "index.h",
+    "function_name": "handle_index",
+    "code_snippet": "   6: int handle_index(struct mg_connection *conn, void *cbdata);"
+  },
+  {
+    "file_path": "cmd_injection.h",
+    "function_name": "handle_ping",
+    "code_snippet": "   6: int handle_ping(struct mg_connection *conn, void *cbdata);"
+  },
+  {
+    "file_path": "cmd_injection.h",
+    "function_name": "handle_exec",
+    "code_snippet": "   7: int handle_exec(struct mg_connection *conn, void *cbdata);"
+  },
+  {
+    "file_path": "file_read.h",
+    "function_name": "handle_read",
+    "code_snippet": "   6: int handle_read(struct mg_connection *conn, void *cbdata);"
+  },
+  {
+    "file_path": "file_read.h",
+    "function_name": "handle_download",
+    "code_snippet": "   7: int handle_download(struct mg_connection *conn, void *cbdata);"
+  },
+  {
+    "file_path": "format_string.h",
+    "function_name": "handle_format",
+    "code_snippet": "   6: int handle_format(struct mg_connection *conn, void *cbdata);"
+  },
+  {
+    "file_path": "memory_leak.h",
+    "function_name": "handle_calc",
+    "code_snippet": "   6: int handle_calc(struct mg_connection *conn, void *cbdata);"
+  },
+  {
+    "file_path": "null_pointer.h",
+    "function_name": "handle_nullptr",
+    "code_snippet": "   6: int handle_nullptr(struct mg_connection *conn, void *cbdata);"
+  },
+  {
+    "file_path": "race_condition.h",
+    "function_name": "handle_race",
+    "code_snippet": "   6: int handle_race(struct mg_connection *conn, void *cbdata);"
+  },
+  {
+    "file_path": "use_after_free.h",
+    "function_name": "handle_uaf_alloc",
+    "code_snippet": "   6: int handle_uaf_alloc(struct mg_connection *conn, void *cbdata);"
+  },
+  {
+    "file_path": "use_after_free.h",
+    "function_name": "handle_uaf_use",
+    "code_snippet": "   7: int handle_uaf_use(struct mg_connection *conn, void *cbdata);"
+  },
+  {
+    "file_path": "use_after_free.h",
+    "function_name": "handle_uaf_free",
+    "code_snippet": "   8: int handle_uaf_free(struct mg_connection *conn, void *cbdata);"
+  },
+  {
+    "file_path": "info_leak.h",
+    "function_name": "handle_info_leak",
+    "code_snippet": "   6: int handle_info_leak(struct mg_connection *conn, void *cbdata);"
+  },
+  {
+    "file_path": "dos.h",
+    "function_name": "handle_dos",
+    "code_snippet": "   6: int handle_dos(struct mg_connection *conn, void *cbdata);"
+  }
+]

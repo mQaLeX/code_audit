@@ -3,6 +3,7 @@ import subprocess
 import sys
 from typing import Dict, Any, Optional
 from .lsp_client import LSPClient
+from .tags_client import TagsClient
 
 
 
@@ -18,20 +19,42 @@ class CodeEnvironment:
         self.current_start = 1
         self.current_end = 100
         self.lsp_client = None
+        self.tags_client = None
         self._lsp_available = False
+        self._tags_available = False
         
         if code_dir:
             try:
                 self.lsp_client = LSPClient(workspace_root=code_dir)
-                if self.lsp_client.start() and self.lsp_client.initialize():
+                if self.lsp_client.is_available() and self.lsp_client.start() and self.lsp_client.initialize():
                     self._lsp_available = True
+                else:
+                    print("LSP 不可用（缺少compile_commands.json）", file=sys.stderr)
             except Exception:
                 self._lsp_available = False
                 print("LSP 初始化失败", file=sys.stderr)
+            
+            if not self._lsp_available:
+                try:
+                    self.tags_client = TagsClient(workspace_root=code_dir)
+                    if self.tags_client.is_available():
+                        if self.tags_client.initialize():
+                            self._tags_available = True
+                            print("Tags 客户端初始化成功", file=sys.stderr)
+                        else:
+                            self._tags_available = False
+                            print("Tags 客户端初始化失败", file=sys.stderr)
+                except Exception:
+                    self._tags_available = False
+                    print("Tags 客户端初始化失败", file=sys.stderr)
     
     def is_lsp_available(self) -> bool:
         """检查 LSP 是否可用"""
         return self._lsp_available
+    
+    def is_tags_available(self) -> bool:
+        """检查 Tags 工具是否可用"""
+        return self._tags_available
     
     def get_tools_prompt(self) -> str:
         """获取 ACI 工具提示词"""
@@ -78,6 +101,22 @@ class CodeEnvironment:
   7| }
   ```
   此时 input_param 是外部输入，要查找 input_param 被使用的地方，就有一下命令：
+  ```
+  find_refs main.c:1:web_handler
+  ```
+"""
+        elif self._tags_available:
+            prompt += """
+
+### Tags 工具（使用ctags和cscope）
+- `go_to_def <file>:<line>:<symbol>` - 查看指定符号的定义
+  例：
+  ```
+  go_to_def main.c:2:validate_hostname
+  ```
+
+- `find_refs <file>:<line>:<symbol>` - 查找符号的所有引用
+  例：
   ```
   find_refs main.c:1:web_handler
   ```
@@ -150,8 +189,8 @@ class CodeEnvironment:
     
     def _cmd_goto(self, args: str) -> Dict[str, Any]:
         """跳转到指定位置查看定义 输入为 main.c:2:validate_hostname"""
-        if not self.lsp_client:
-            return {"error": "LSP未启用", "done": False}
+        if not self.lsp_client and not self.tags_client:
+            return {"error": "LSP和Tags工具都未启用", "done": False}
         
         try:
             parts = args.split(":")
@@ -159,15 +198,26 @@ class CodeEnvironment:
                 return {"error": "格式错误，应为: file:line:symbol", "done": False}
             
             file_path = parts[0].strip()
-            # 检查文件是否存在
             file_full_path = os.path.join(self.code_dir, file_path) if self.code_dir else file_path
             if not os.path.exists(file_full_path):
                 return {"error": f"文件不存在: {file_full_path}", "done": False}
             file_full_path = os.path.abspath(file_full_path)
             line = int(parts[1].strip())
             symbol = parts[2].strip()
-            character = -1
             
+            if self._lsp_available:
+                return self._goto_via_lsp(file_full_path, line, symbol)
+            elif self._tags_available:
+                return self._goto_via_tags(symbol, file_full_path)
+            else:
+                return {"error": "无可用的代码导航工具", "done": False}
+        except Exception as e:
+            return {"error": f"跳转失败: {str(e)}", "done": False}
+    
+    def _goto_via_lsp(self, file_full_path: str, line: int, symbol: str) -> Dict[str, Any]:
+        """通过 LSP 查找定义"""
+        try:
+            character = -1
             with open(file_full_path, 'r', encoding='utf-8', errors='ignore') as f:
                 lines = f.readlines()
                 if line > len(lines):
@@ -184,7 +234,7 @@ class CodeEnvironment:
                 return {"error": "未找到定义", "done": False}
             
             def_info = definitions[0]
-            def_file_path = def_info.get("uri", file_path)
+            def_file_path = def_info.get("uri", file_full_path)
             if def_file_path.startswith("file://"):
                 def_file_path = def_file_path[7:]
             
@@ -192,12 +242,9 @@ class CodeEnvironment:
             start_line = range_info.get("start", {}).get("line", 0) + 1
             end_line = range_info.get("end", {}).get("line", 0) + 1
             
-            # code_snippet 加上行号
             with open(def_file_path, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
                 
-                # 查找函数体的结束位置
-                # 从函数定义行开始，找到匹配的右大括号
                 brace_count = 0
                 found_start_brace = False
                 actual_end_line = end_line
@@ -218,7 +265,6 @@ class CodeEnvironment:
                 
                 code_snippet = ''.join(f"{i+start_line:6d} | {line}" for i, line in enumerate(lines[start_line-1:actual_end_line]))
             
-            # 定义位置显示相对路径
             if self.code_dir and def_file_path.startswith(self.code_dir):
                 def_file_path = def_file_path[len(self.code_dir)+1:]
             
@@ -227,12 +273,68 @@ class CodeEnvironment:
             
             return {"done": False, "output": output}
         except Exception as e:
-            return {"error": f"跳转失败: {str(e)}", "done": False}
+            return {"error": f"LSP跳转失败: {str(e)}", "done": False}
+    
+    def _goto_via_tags(self, symbol: str, file_path: str) -> Dict[str, Any]:
+        """通过 tags/cscope 查找定义"""
+        try:
+            defs = self.tags_client.find_symbol_definition(symbol)
+            
+            if not defs:
+                defs = self.tags_client.find_definition(symbol, file_path)
+            
+            if not defs:
+                return {"error": f"未找到符号 '{symbol}' 的定义", "done": False}
+            
+            def_info = defs[0]
+            def_file_path = def_info.get("file", "")
+            def_line = def_info.get("line", 1)
+            
+            if not os.path.isabs(def_file_path):
+                def_file_path = os.path.join(self.code_dir, def_file_path)
+            
+            if not os.path.exists(def_file_path):
+                return {"error": f"定义文件不存在: {def_file_path}", "done": False}
+            
+            with open(def_file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                lines = f.readlines()
+            
+            start_line = def_line
+            end_line = def_line
+            
+            brace_count = 0
+            found_start_brace = False
+            for i in range(def_line - 1, len(lines)):
+                line_content = lines[i]
+                for char in line_content:
+                    if char == '{':
+                        brace_count += 1
+                        found_start_brace = True
+                    elif char == '}':
+                        brace_count -= 1
+                        if found_start_brace and brace_count == 0:
+                            end_line = i + 1
+                            break
+                if found_start_brace and brace_count == 0:
+                    break
+            
+            code_snippet = ''.join(f"{i+start_line:6d} | {line}" for i, line in enumerate(lines[start_line-1:end_line]))
+            
+            display_file_path = def_file_path
+            if self.code_dir and def_file_path.startswith(self.code_dir):
+                display_file_path = def_file_path[len(self.code_dir)+1:]
+            
+            output = f"定义位置: {display_file_path}:{start_line}-{end_line}\n\n"
+            output += code_snippet
+            
+            return {"done": False, "output": output}
+        except Exception as e:
+            return {"error": f"Tags跳转失败: {str(e)}", "done": False}
     
     def _cmd_find_refs(self, args: str) -> Dict[str, Any]:
         """查找符号的所有引用"""
-        if not self.lsp_client:
-            return {"error": "LSP未启用", "done": False}
+        if not self.lsp_client and not self.tags_client:
+            return {"error": "LSP和Tags工具都未启用", "done": False}
         
         try:
             parts = args.split(":")
@@ -240,12 +342,25 @@ class CodeEnvironment:
                 return {"error": "格式错误，应为: file:line:symbol", "done": False}
             
             file_path = parts[0].strip()
+            file_full_path = os.path.join(self.code_dir, file_path) if self.code_dir else file_path
+            if not os.path.exists(file_full_path):
+                return {"error": f"文件不存在: {file_full_path}", "done": False}
+            file_full_path = os.path.abspath(file_full_path)
             line = int(parts[1].strip())
             symbol = parts[2].strip()
-            if self.code_dir and not os.path.isabs(file_path):
-                file_path = os.path.join(self.code_dir, file_path)
-            file_full_path = os.path.abspath(file_path)
             
+            if self._lsp_available:
+                return self._find_refs_via_lsp(file_full_path, line, symbol)
+            elif self._tags_available:
+                return self._find_refs_via_tags(symbol, file_full_path)
+            else:
+                return {"error": "无可用的代码导航工具", "done": False}
+        except Exception as e:
+            return {"error": f"查找引用失败: {str(e)}", "done": False}
+    
+    def _find_refs_via_lsp(self, file_full_path: str, line: int, symbol: str) -> Dict[str, Any]:
+        """通过 LSP 查找引用"""
+        try:
             with open(file_full_path, 'r', encoding='utf-8', errors='ignore') as f:
                 lines = f.readlines()
                 if line > len(lines):
@@ -263,7 +378,7 @@ class CodeEnvironment:
             
             output = f"找到 {len(references)} 个引用:\n\n"
             for i, ref_info in enumerate(references[:10], 1):
-                ref_file_path = ref_info.get("uri", file_path)
+                ref_file_path = ref_info.get("uri", file_full_path)
                 if ref_file_path.startswith("file://"):
                     ref_file_path = ref_file_path[7:]
                 
@@ -275,7 +390,37 @@ class CodeEnvironment:
             
             return {"done": False, "output": output}
         except Exception as e:
-            return {"error": f"查找引用失败: {str(e)}", "done": False}
+            return {"error": f"LSP查找引用失败: {str(e)}", "done": False}
+    
+    def _find_refs_via_tags(self, symbol: str, file_path: str) -> Dict[str, Any]:
+        """通过 tags/cscope 查找引用"""
+        try:
+            refs = self.tags_client.find_references(symbol, file_path)
+            
+            if not refs:
+                return {"error": f"未找到符号 '{symbol}' 的引用", "done": False}
+            
+            output = f"找到 {len(refs)} 个引用:\n\n"
+            for i, ref_info in enumerate(refs[:10], 1):
+                ref_file_path = ref_info.get("file", "")
+                ref_line = ref_info.get("line", 1)
+                ref_context = ref_info.get("context", "")
+                
+                if not os.path.isabs(ref_file_path):
+                    ref_file_path = os.path.join(self.code_dir, ref_file_path)
+                
+                display_file_path = ref_file_path
+                if self.code_dir and ref_file_path.startswith(self.code_dir):
+                    display_file_path = ref_file_path[len(self.code_dir)+1:]
+                
+                output += f"{i}. {display_file_path}:{ref_line}"
+                if ref_context:
+                    output += f" {ref_context[:50]}..."
+                output += "\n"
+            
+            return {"done": False, "output": output}
+        except Exception as e:
+            return {"error": f"Tags查找引用失败: {str(e)}", "done": False}
     
     def _cmd_search(self, query: str) -> Dict[str, Any]:
         """使用 ripgrep 在代码库中搜索"""

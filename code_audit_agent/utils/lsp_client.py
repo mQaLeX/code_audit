@@ -10,18 +10,40 @@ class LSPClient:
         self.workspace_root = os.path.abspath(workspace_root or os.getcwd())
         self.process = None
         self.request_id = 0
+        self._available = False
+        self.compile_json_path = None
+        
         if compile_json_path == None:
-            # 从workspace目录里查找compile_json文件，查找所有当前目录和二级目录
-            for dir in os.listdir(self.workspace_root):
-                compile_json_path = os.path.join(self.workspace_root, dir, 'compile_commands.json')
-                if os.path.exists(compile_json_path):
-                    break
+            compile_json_path = os.path.join(self.workspace_root, 'compile_commands.json')
+            if os.path.exists(compile_json_path):
+                self.compile_json_path = compile_json_path
+                self._available = True
             else:
-                print(f"[ERROR] 未找到compile_commands.json文件: {compile_json_path}")
-                return
-                compile_json_path = None
+                for dir in os.listdir(self.workspace_root):
+                    compile_json_path = os.path.join(self.workspace_root, dir, 'compile_commands.json')
+                    if os.path.isdir(os.path.join(self.workspace_root, dir)) and os.path.exists(compile_json_path):
+                        self.compile_json_path = compile_json_path
+                        self._available = True
+                        break
+                else:
+                    print(f"[WARN] 未找到compile_commands.json文件，LSP功能将受限")
+                    compile_json_path = None
+        else:
+            if os.path.exists(compile_json_path):
+                self.compile_json_path = compile_json_path
+                self._available = True
+            else:
+                print(f"[WARN] 指定的compile_commands.json文件不存在: {compile_json_path}")
+    
+    def is_available(self) -> bool:
+        """检查LSP是否可用（有compile_commands.json）"""
+        return self._available
 
     def start(self) -> bool:
+        if not self._available:
+            print(f"[WARN] LSP不可用：缺少compile_commands.json")
+            return False
+        
         try:
             self.process = subprocess.Popen(
                 'clangd',

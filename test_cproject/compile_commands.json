@@ -1,0 +1,92 @@
+[
+{
+  "directory": "/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/build",
+  "command": "/usr/bin/cc -DNO_CGI -DNO_SSL -I/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/build/_deps/civetweb-src/include -g -std=gnu99 -arch arm64 -o CMakeFiles/test_cproject.dir/main.c.o -c /Users/lometsj/Documents/llm_tool/code_audit/test_cproject/main.c",
+  "file": "/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/main.c",
+  "output": "CMakeFiles/test_cproject.dir/main.c.o"
+},
+{
+  "directory": "/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/build",
+  "command": "/usr/bin/cc -DNO_CGI -DNO_SSL -I/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/build/_deps/civetweb-src/include -g -std=gnu99 -arch arm64 -o CMakeFiles/test_cproject.dir/utils.c.o -c /Users/lometsj/Documents/llm_tool/code_audit/test_cproject/utils.c",
+  "file": "/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/utils.c",
+  "output": "CMakeFiles/test_cproject.dir/utils.c.o"
+},
+{
+  "directory": "/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/build",
+  "command": "/usr/bin/cc -DNO_CGI -DNO_SSL -I/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/build/_deps/civetweb-src/include -g -std=gnu99 -arch arm64 -o CMakeFiles/test_cproject.dir/index.c.o -c /Users/lometsj/Documents/llm_tool/code_audit/test_cproject/index.c",
+  "file": "/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/index.c",
+  "output": "CMakeFiles/test_cproject.dir/index.c.o"
+},
+{
+  "directory": "/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/build",
+  "command": "/usr/bin/cc -DNO_CGI -DNO_SSL -I/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/build/_deps/civetweb-src/include -g -std=gnu99 -arch arm64 -o CMakeFiles/test_cproject.dir/cmd_injection.c.o -c /Users/lometsj/Documents/llm_tool/code_audit/test_cproject/cmd_injection.c",
+  "file": "/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/cmd_injection.c",
+  "output": "CMakeFiles/test_cproject.dir/cmd_injection.c.o"
+},
+{
+  "directory": "/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/build",
+  "command": "/usr/bin/cc -DNO_CGI -DNO_SSL -I/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/build/_deps/civetweb-src/include -g -std=gnu99 -arch arm64 -o CMakeFiles/test_cproject.dir/file_read.c.o -c /Users/lometsj/Documents/llm_tool/code_audit/test_cproject/file_read.c",
+  "file": "/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/file_read.c",
+  "output": "CMakeFiles/test_cproject.dir/file_read.c.o"
+},
+{
+  "directory": "/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/build",
+  "command": "/usr/bin/cc -DNO_CGI -DNO_SSL -I/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/build/_deps/civetweb-src/include -g -std=gnu99 -arch arm64 -o CMakeFiles/test_cproject.dir/format_string.c.o -c /Users/lometsj/Documents/llm_tool/code_audit/test_cproject/format_string.c",
+  "file": "/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/format_string.c",
+  "output": "CMakeFiles/test_cproject.dir/format_string.c.o"
+},
+{
+  "directory": "/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/build",
+  "command": "/usr/bin/cc -DNO_CGI -DNO_SSL -I/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/build/_deps/civetweb-src/include -g -std=gnu99 -arch arm64 -o CMakeFiles/test_cproject.dir/memory_leak.c.o -c /Users/lometsj/Documents/llm_tool/code_audit/test_cproject/memory_leak.c",
+  "file": "/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/memory_leak.c",
+  "output": "CMakeFiles/test_cproject.dir/memory_leak.c.o"
+},
+{
+  "directory": "/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/build",
+  "command": "/usr/bin/cc -DNO_CGI -DNO_SSL -I/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/build/_deps/civetweb-src/include -g -std=gnu99 -arch arm64 -o CMakeFiles/test_cproject.dir/null_pointer.c.o -c /Users/lometsj/Documents/llm_tool/code_audit/test_cproject/null_pointer.c",
+  "file": "/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/null_pointer.c",
+  "output": "CMakeFiles/test_cproject.dir/null_pointer.c.o"
+},
+{
+  "directory": "/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/build",
+  "command": "/usr/bin/cc -DNO_CGI -DNO_SSL -I/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/build/_deps/civetweb-src/include -g -std=gnu99 -arch arm64 -o CMakeFiles/test_cproject.dir/race_condition.c.o -c /Users/lometsj/Documents/llm_tool/code_audit/test_cproject/race_condition.c",
+  "file": "/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/race_condition.c",
+  "output": "CMakeFiles/test_cproject.dir/race_condition.c.o"
+},
+{
+  "directory": "/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/build",
+  "command": "/usr/bin/cc -DNO_CGI -DNO_SSL -I/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/build/_deps/civetweb-src/include -g -std=gnu99 -arch arm64 -o CMakeFiles/test_cproject.dir/use_after_free.c.o -c /Users/lometsj/Documents/llm_tool/code_audit/test_cproject/use_after_free.c",
+  "file": "/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/use_after_free.c",
+  "output": "CMakeFiles/test_cproject.dir/use_after_free.c.o"
+},
+{
+  "directory": "/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/build",
+  "command": "/usr/bin/cc -DNO_CGI -DNO_SSL -I/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/build/_deps/civetweb-src/include -g -std=gnu99 -arch arm64 -o CMakeFiles/test_cproject.dir/info_leak.c.o -c /Users/lometsj/Documents/llm_tool/code_audit/test_cproject/info_leak.c",
+  "file": "/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/info_leak.c",
+  "output": "CMakeFiles/test_cproject.dir/info_leak.c.o"
+},
+{
+  "directory": "/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/build",
+  "command": "/usr/bin/cc -DNO_CGI -DNO_SSL -I/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/build/_deps/civetweb-src/include -g -std=gnu99 -arch arm64 -o CMakeFiles/test_cproject.dir/dos.c.o -c /Users/lometsj/Documents/llm_tool/code_audit/test_cproject/dos.c",
+  "file": "/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/dos.c",
+  "output": "CMakeFiles/test_cproject.dir/dos.c.o"
+},
+{
+  "directory": "/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/build",
+  "command": "/usr/bin/cc -DNO_CGI -DNO_SSL -I/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/build/_deps/civetweb-src/include -g -std=gnu99 -arch arm64 -o CMakeFiles/test_cproject.dir/_deps/civetweb-src/src/civetweb.c.o -c /Users/lometsj/Documents/llm_tool/code_audit/test_cproject/build/_deps/civetweb-src/src/civetweb.c",
+  "file": "/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/build/_deps/civetweb-src/src/civetweb.c",
+  "output": "CMakeFiles/test_cproject.dir/_deps/civetweb-src/src/civetweb.c.o"
+},
+{
+  "directory": "/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/build/_deps/civetweb-build/src",
+  "command": "/usr/bin/cc -DDEBUG -DOPENSSL_API_1_1 -DUSE_IPV6 -DUSE_STACK_SIZE=102400 -I/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/build/_deps/civetweb-src/include  -std=c11 -Wall -Wextra -Wshadow -Wconversion -Wmissing-prototypes -Weverything -Wparentheses -Wno-padded -Wno-unused-macros -Wno-format-nonliteral -Wno-cast-qual -pedantic-errors -fvisibility=hidden -g -fsanitize=undefined -fstack-protector-all -std=gnu99 -arch arm64   -O0 -g -o CMakeFiles/civetweb-c-library.dir/civetweb.c.o -c /Users/lometsj/Documents/llm_tool/code_audit/test_cproject/build/_deps/civetweb-src/src/civetweb.c",
+  "file": "/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/build/_deps/civetweb-src/src/civetweb.c",
+  "output": "_deps/civetweb-build/src/CMakeFiles/civetweb-c-library.dir/civetweb.c.o"
+},
+{
+  "directory": "/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/build/_deps/civetweb-build/src",
+  "command": "/usr/bin/cc -DDEBUG -DOPENSSL_API_1_1 -DUSE_IPV6 -DUSE_STACK_SIZE=102400 -I/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/build/_deps/civetweb-src/include  -std=c11 -Wall -Wextra -Wshadow -Wconversion -Wmissing-prototypes -Weverything -Wparentheses -Wno-padded -Wno-unused-macros -Wno-format-nonliteral -Wno-cast-qual -pedantic-errors -fvisibility=hidden -g -fsanitize=undefined -fstack-protector-all -std=gnu99 -arch arm64   -O0 -g -o CMakeFiles/civetweb-c-executable.dir/main.c.o -c /Users/lometsj/Documents/llm_tool/code_audit/test_cproject/build/_deps/civetweb-src/src/main.c",
+  "file": "/Users/lometsj/Documents/llm_tool/code_audit/test_cproject/build/_deps/civetweb-src/src/main.c",
+  "output": "_deps/civetweb-build/src/CMakeFiles/civetweb-c-executable.dir/main.c.o"
+}
+]

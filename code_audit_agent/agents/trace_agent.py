@@ -83,7 +83,6 @@ class TraceAgent:
             
             try:
                 response_content = self.llm_client.chat(
-                    think=False,
                     messages=messages,
                     temperature=0,
                     # response_format={

@@ -35,6 +35,7 @@ htmlcov/
 
 .DS_Store
 *.log
+*.idx
 
 code_audit_agent/reports/
 code_audit_agent/tools/exploit_scripts/

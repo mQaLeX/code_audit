@@ -21,9 +21,22 @@ class FunctionScanner:
         return script_path
 
     def _run_scanner_script(self, script_path: str, code_dir: str) -> List[FunctionInfo]:
-        spec = importlib.util.spec_from_file_location("scanner", script_path)
+        import importlib.util
+        import sys
+        
+        module_name = f"code_audit_agent.knowledge.{os.path.basename(os.path.dirname(script_path))}.{os.path.basename(script_path)[:-3]}"
+        
+        spec = importlib.util.spec_from_file_location(module_name, script_path)
         if spec and spec.loader:
             scanner_module = importlib.util.module_from_spec(spec)
+            
+            package_dir = os.path.dirname(script_path)
+            for _ in range(3):
+                package_dir = os.path.dirname(package_dir)
+            sys.modules['code_audit_agent'] = type(sys)('code_audit_agent')
+            sys.modules['code_audit_agent'].__path__ = [os.path.join(os.path.dirname(__file__), '..')]
+            
+            sys.modules[module_name] = scanner_module
             spec.loader.exec_module(scanner_module)
             
             if hasattr(scanner_module, 'scan'):
