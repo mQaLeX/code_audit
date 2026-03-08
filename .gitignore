@@ -41,5 +41,6 @@ code_audit_agent/reports/
 code_audit_agent/tools/exploit_scripts/
 code_audit_agent/tools/screenshots/
 code_audit_agent/scanners/generated_*.py
+code_audit_agent/sessions/
 
 vulnerable_code_*/

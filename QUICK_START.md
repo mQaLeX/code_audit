@@ -69,14 +69,23 @@ python main.py python list
 # 列出指定项目类型和攻击面支持的漏洞类型
 python main.py python web list
 
-# 开始审计
+# 开始审计Python Web应用
 python main.py python web /path/to/code
+
+# 审计C语言civetweb应用
+python main.py c civetweb /path/to/code
 
 # 使用自定义参数
 python main.py python web /path/to/code --model gpt-4 --max-workers 10
 
+# 启用LSP（需要 compile_commands.json）
+python main.py c civetweb /path/to/code --enable-lsp
+
 # 跳过漏洞利用
 python main.py python web /path/to/code --skip-exploit
+
+# 恢复历史会话
+python main.py --session <会话ID>
 
 # 生成JSON报告
 python main.py python web /path/to/code --report-format json

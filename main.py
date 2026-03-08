@@ -18,6 +18,7 @@ from code_audit_agent.scanners import FunctionScanner
 from code_audit_agent.agents import AuditAgent, ExploitAgent, ReportAgent, TraceAgent
 from code_audit_agent.utils.session_manager import SessionManager
 from code_audit_agent.utils.pipeline import Pipeline
+from code_audit_agent.utils.docker_manager import DockerManager
 
 
 console = Console()
@@ -256,11 +257,36 @@ def main():
             sys.exit(1)
         
         config.code_dir = code_dir
-        session = SessionManager.create(
-            project_type=config.project_type,
-            attack_surface=config.attack_surface,
-            code_dir=code_dir
-        )
+        
+        docker_manager = None
+        if config.docker_image:
+            console.print(f"[cyan]正在初始化 Docker 环境...[/cyan]")
+            console.print(f"[cyan]Docker 镜像: {config.docker_image}[/cyan]")
+            
+            if not DockerManager.check_docker_available():
+                console.print(f"[bold red]错误: Docker 不可用或未安装[/bold red]")
+                sys.exit(1)
+            
+            docker_manager = DockerManager(config.docker_image, code_dir)
+            if not docker_manager.setup():
+                console.print(f"[bold red]错误: Docker 环境初始化失败[/bold red]")
+                sys.exit(1)
+            
+            console.print(f"[green]✓ Docker 容器已启动: {docker_manager.container_id}[/green]")
+            
+            session = SessionManager.create(
+                project_type=config.project_type,
+                attack_surface=config.attack_surface,
+                code_dir=code_dir,
+                docker_image=config.docker_image,
+                container_id=docker_manager.container_id
+            )
+        else:
+            session = SessionManager.create(
+                project_type=config.project_type,
+                attack_surface=config.attack_surface,
+                code_dir=code_dir
+            )
         console.print(f"[green]✓ 创建新会话: {session.session_id}[/green]")
     else:
         session = SessionManager.load(config.session_id)
@@ -269,9 +295,26 @@ def main():
             sys.exit(1)
         
         metadata = session._load_metadata()
-        config.project_type = metadata.get('project_type', config.project_type)
-        config.attack_surface = metadata.get('attack_surface', config.attack_surface)
-        config.code_dir = metadata.get('code_dir', '')
+        # Only override with metadata if values exist in metadata
+        # This prevents issues when loading sessions without project_type/attack_surface
+        if metadata.get('project_type'):
+            config.project_type = metadata.get('project_type')
+        if metadata.get('attack_surface'):
+            config.attack_surface = metadata.get('attack_surface')
+        if metadata.get('code_dir'):
+            config.code_dir = metadata.get('code_dir', '')
+        
+        docker_manager = None
+        docker_info = session.get_docker_info()
+        if docker_info.get('docker_image') and docker_info.get('container_id'):
+            console.print(f"[cyan]从会话中加载 Docker 信息...[/cyan]")
+            console.print(f"[cyan]Docker 镜像: {docker_info['docker_image']}[/cyan]")
+            console.print(f"[cyan]容器 ID: {docker_info['container_id']}[/cyan]")
+            docker_manager = DockerManager(docker_info['docker_image'], config.code_dir)
+            docker_manager.container_id = docker_info['container_id']
+            if not docker_manager.is_container_running():
+                console.print(f"[yellow]容器未运行，尝试启动...[/yellow]")
+                docker_manager.start_container()
         
         console.print(f"[green]✓ 加载会话: {session.session_id}[/green]")
         
@@ -282,7 +325,7 @@ def main():
     
     from_stage = config.from_stage if hasattr(config, 'from_stage') and config.from_stage else None
     
-    pipeline = Pipeline(session, config)
+    pipeline = Pipeline(session, config, docker_manager)
     
     success = pipeline.run(from_stage=from_stage)
     

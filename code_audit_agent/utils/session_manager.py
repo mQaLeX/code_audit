@@ -20,7 +20,8 @@ class SessionManager:
         )
 
     @classmethod
-    def create(cls, project_type: str, attack_surface: str, code_dir: str) -> 'SessionManager':
+    def create(cls, project_type: str, attack_surface: str, code_dir: str, 
+               docker_image: Optional[str] = None, container_id: Optional[str] = None) -> 'SessionManager':
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         session_id = f"{timestamp}_{project_type}_{attack_surface}"
         instance = cls(session_id)
@@ -32,7 +33,9 @@ class SessionManager:
             'attack_surface': attack_surface,
             'code_dir': os.path.abspath(code_dir),
             'created_at': datetime.now().isoformat(),
-            'completed_stages': []
+            'completed_stages': [],
+            'docker_image': docker_image,
+            'container_id': container_id
         }
         instance._save_metadata(metadata)
         return instance
@@ -335,3 +338,21 @@ class SessionManager:
         metadata['completed_stages'] = completed_stages
         metadata['last_updated'] = datetime.now().isoformat()
         self._save_metadata(metadata)
+
+    def update_docker_info(self, docker_image: str, container_id: str):
+        metadata = self._load_metadata()
+        metadata['docker_image'] = docker_image
+        metadata['container_id'] = container_id
+        metadata['last_updated'] = datetime.now().isoformat()
+        self._save_metadata(metadata)
+
+    def get_docker_info(self) -> Dict[str, Optional[str]]:
+        metadata = self._load_metadata()
+        return {
+            'docker_image': metadata.get('docker_image'),
+            'container_id': metadata.get('container_id')
+        }
+
+    def get_code_dir(self) -> str:
+        metadata = self._load_metadata()
+        return metadata.get('code_dir', '')

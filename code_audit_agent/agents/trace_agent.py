@@ -9,9 +9,7 @@ from datetime import datetime
 import re
 
 from rich.console import Console
-from rich.panel import Panel
 from rich.syntax import Syntax
-from rich.table import Table
 
 from ..utils.llm_response_parser import clean_and_parse
 from ..utils.models import (
@@ -27,7 +25,7 @@ console = Console()
 
 
 class TraceAgent:
-    def __init__(self, llm_client: LLMClient, max_workers: int = 1, enable_lsp: bool = False, code_dir: str = None, project_type: Optional[str] = None, attack_surface: Optional[str] = None):
+    def __init__(self, llm_client: LLMClient, max_workers: int = 1, enable_lsp: bool = False, code_dir: str = None, project_type: Optional[str] = None, attack_surface: Optional[str] = None, docker_manager=None):
         self.llm_client = llm_client
         self.max_workers = max_workers
         self.enable_lsp = enable_lsp
@@ -35,12 +33,13 @@ class TraceAgent:
         self.knowledge_base = KnowledgeBase()
         self.project_type = project_type
         self.attack_surface = attack_surface
+        self.docker_manager = docker_manager
 
 
     def trace_function(self, function_info: FunctionInfo) -> TraceResult:
         """使用 ACI 命令模式追踪函数数据流"""
         
-        env = CodeEnvironment(self.code_dir)
+        env = CodeEnvironment(self.code_dir, self.docker_manager)
 
         
         knowledge = self.knowledge_base.get_full_knowledge(
@@ -58,36 +57,29 @@ class TraceAgent:
         
         observation = f"环境已初始化。请开始追踪函数的数据流。优先使用lsp命令。"
         
-        console.print(Panel.fit(
-            f"[bold cyan]追踪任务[/bold cyan]\n"
-            f"文件: [green]{function_info.file_path}[/green]\n",
-            title="Trace Agent"
-        ))
+        console.print()
+        console.print(f"[bold cyan]{'═' * 20} Trace Agent {'═' * 20}[/bold cyan]")
+        console.print(f"[bold cyan]追踪任务[/bold cyan]")
+        console.print(f"文件: [green]{function_info.file_path}[/green]")
+        console.print(f"[cyan]{'─' * 60}[/cyan]")
 
         
-        console.print(Panel(
-            system_prompt,
-            title="[bold red]System Prompt[/bold red]",
-            border_style="red",
-            expand=False
-        ))
+        # console.print()
+        # console.print(f"[bold red]{'═' * 20} System Prompt {'═' * 20}[/bold red]")
+        # console.print(system_prompt)
+        # console.print(f"[red]{'─' * 60}[/red]")
         
-        console.print(Panel(
-            user_prompt,
-            title="[bold blue]User Prompt[/bold blue]",
-            border_style="blue",
-            expand=False
-        ))
+        # console.print()
+        # console.print(f"[bold blue]{'═' * 20} User Prompt {'═' * 20}[/bold blue]")
+        # console.print(user_prompt)
+        # console.print(f"[blue]{'─' * 60}[/blue]")
         
         for step in range(30):
             
             try:
-                response_content = self.llm_client.chat(
+                response_content, think_content = self.llm_client.chat(
                     messages=messages,
                     temperature=0,
-                    # response_format={
-                    #     "type": "json_object"
-                    # }
                 )
                 try:
                     json_response = clean_and_parse(response_content)
@@ -95,6 +87,10 @@ class TraceAgent:
                     console.print(f"[bold red]Step {step} 解析 JSON 失败，进行下一轮请求看看还正常不[/bold red]")
                     continue
                 
+                messages.append({
+                    "role": "assistant",
+                    "content": think_content
+                })
                 
                 messages.append({
                     "role": "assistant",
@@ -104,12 +100,10 @@ class TraceAgent:
                 result = env.execute(json_response.get("action", ""))
                 observation = result.get("output", result.get("error", ""))
                 
-                console.print(Panel(
-                    observation,
-                    title="[bold]command output[/bold]",
-                    border_style="yellow",
-                    expand=False
-                ))
+                console.print()
+                console.print(f"[bold yellow]{'═' * 20} command output {'═' * 20}[/bold yellow]")
+                console.print(observation)
+                console.print(f"[yellow]{'─' * 60}[/yellow]")
                 messages.append({
                     "role": "user",
                     "content": f"上一个命令的输出: {observation}"

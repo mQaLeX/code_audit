@@ -74,6 +74,7 @@ class LLMClient:
         _current_response = None
         
         full_content = ""
+        full_think_content = ""
         
         last_error = None
         for attempt in range(max_retries):
@@ -114,6 +115,7 @@ class LLMClient:
                     if reasoning_content:
                         prefix = "\n🤔 " if first_reasoning else ""
                         reasoning_text = f"{prefix}{reasoning_content}"
+                        full_think_content += reasoning_text
                         
                         if on_reasoning:
                             on_reasoning(reasoning_text)
@@ -140,7 +142,7 @@ class LLMClient:
                     print()
                 
                 _current_response = None
-                return full_content
+                return full_content, full_think_content
                     
             except KeyboardInterrupt:
                 print("\n请求已取消")

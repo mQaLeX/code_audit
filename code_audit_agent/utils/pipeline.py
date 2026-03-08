@@ -24,11 +24,12 @@ console = Console()
 class Pipeline:
     STAGES = ['scanner', 'trace', 'audit', 'exploit', 'report']
 
-    def __init__(self, session: SessionManager, config: Any, llm_client: LLMClient = None):
+    def __init__(self, session: SessionManager, config: Any, docker_manager=None, llm_client: LLMClient = None):
         self.session = session
         self.config = config
         self.llm_client = llm_client
         self.code_dir = config.code_dir
+        self.docker_manager = docker_manager
 
         self.scanner = None
         self.trace_agent = None
@@ -167,7 +168,8 @@ class Pipeline:
                     enable_lsp=self.config.enable_lsp,
                     project_type=self.config.project_type,
                     attack_surface=self.config.attack_surface,
-                    code_dir=self.code_dir
+                    code_dir=self.code_dir,
+                    docker_manager=self.docker_manager
                 )
 
                 trace_results = trace_agent.trace_functions_concurrent(functions)
@@ -207,7 +209,8 @@ class Pipeline:
                 max_workers=self.config.max_workers,
                 attack_surface=self.config.attack_surface,
                 project_type=self.config.project_type,
-                code_dir=self.code_dir
+                code_dir=self.code_dir,
+                docker_manager=self.docker_manager
             )
 
             audit_tasks = audit_agent.create_audit_tasks_with_trace(complete_traces)
@@ -268,7 +271,8 @@ class Pipeline:
 
             exploit_agent = ExploitAgent(
                 llm_client=self.llm_client,
-                code_dir=self.code_dir
+                code_dir=self.code_dir,
+                docker_manager=self.docker_manager
             )
 
             exploit_results = []

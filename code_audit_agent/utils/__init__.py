@@ -1,6 +1,7 @@
 from .llm_client import LLMClient
 from .lsp_client import LSPClient
 from .config import Config, get_config
+from .docker_manager import DockerManager
 from .models import (
     FunctionInfo,
     AuditTask,
@@ -17,6 +18,7 @@ __all__ = [
     "LSPClient",
     "Config",
     "get_config",
+    "DockerManager",
     "FunctionInfo",
     "AuditTask",
     "AuditResult",

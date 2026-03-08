@@ -22,14 +22,15 @@ config = get_config()
 
 
 class AuditAgent:
-    def __init__(self, llm_client: LLMClient, max_workers: int = 5, attack_surface: str = "", project_type: str = "", code_dir: str = ""):
+    def __init__(self, llm_client: LLMClient, max_workers: int = 5, attack_surface: str = "", project_type: str = "", code_dir: str = "", docker_manager=None):
         self.llm_client = llm_client
         self.max_workers = max_workers
         self.attack_surface = attack_surface
         self.project_type = project_type
         self.debug = config.debug
         self.code_dir = code_dir
-        self.code_environment = CodeEnvironment(code_dir)
+        self.docker_manager = docker_manager
+        self.code_environment = CodeEnvironment(code_dir, docker_manager)
 
 
 
@@ -321,7 +322,7 @@ class AuditAgent:
                 self._debug_print(f"第 {current_turn} 轮对话")
 
 
-                response_content = self.llm_client.chat(
+                response_content, think_content = self.llm_client.chat(
                     messages=messages,
                     temperature=0,
                 )
@@ -338,8 +339,14 @@ class AuditAgent:
 
                 messages.append({
                     "role": "assistant",
+                    "content": think_content
+                })
+                messages.append({
+                    "role": "assistant",
                     "content": response_content
                 })
+
+
 
                 action = json_response.get("action", "")
                 

@@ -12,7 +12,7 @@ from .tags_client import TagsClient
 class CodeEnvironment:
     """代码环境，用于执行 ACI 命令"""
     
-    def __init__(self, code_dir: Optional[str] = None):
+    def __init__(self, code_dir: Optional[str] = None, docker_manager=None):
         self.code_dir = code_dir
         self.current_file = None
         self.current_lines = []
@@ -22,10 +22,11 @@ class CodeEnvironment:
         self.tags_client = None
         self._lsp_available = False
         self._tags_available = False
+        self.docker_manager = docker_manager
         
         if code_dir:
             try:
-                self.lsp_client = LSPClient(workspace_root=code_dir)
+                self.lsp_client = LSPClient(workspace_root=code_dir, docker_manager=docker_manager)
                 if self.lsp_client.is_available() and self.lsp_client.start() and self.lsp_client.initialize():
                     self._lsp_available = True
                 else:
@@ -36,7 +37,7 @@ class CodeEnvironment:
             
             if not self._lsp_available:
                 try:
-                    self.tags_client = TagsClient(workspace_root=code_dir)
+                    self.tags_client = TagsClient(workspace_root=code_dir, docker_manager=docker_manager)
                     if self.tags_client.is_available():
                         if self.tags_client.initialize():
                             self._tags_available = True

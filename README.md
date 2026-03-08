@@ -81,10 +81,14 @@ OPENAI_BASE_URL=https://api.openai.com/v1
 
 ## 使用方法
 
-### 基本用法
+### 基础用法
 
 ```bash
-python main.py <project_type> <attack_surface> <code_dir>
+# 审计Python Web应用
+python main.py python web /path/to/code
+
+# 审计C语言civetweb应用
+python main.py c civetweb /path/to/code
 ```
 
 ### 列表查询
@@ -95,22 +99,71 @@ python main.py <project_type> list            # 查看指定project_type支持�
 python main.py <project_type> <attack_surface> list  # 查看支持的漏洞类型
 ```
 
+### 会话管理
+
+```bash
+python main.py --list sessions               # 列出所有历史会话
+python main.py --session <会话ID>             # 恢复历史会话
+python main.py --session <会话ID> --from-stage audit  # 从审计阶段继续
+```
+
+### 历史结果使用
+
+```bash
+python main.py --list trace                  # 列出历史追踪结果
+python main.py --trace <文件名>               # 使用历史追踪结果继续
+python main.py --list audit                  # 列出历史审计结果
+python main.py --audit <文件名>               # 使用历史审计结果进行漏洞利用
+python main.py --list exploit                # 列出历史利用结果
+python main.py --exploit <文件名>             # 使用历史利用结果生成报告
+```
+
+### 常用选项
+
+```bash
+python main.py <project_type> <attack_surface> <code_dir> --verbose    # 显示详细输出
+python main.py <project_type> <attack_surface> <code_dir> --debug      # 显示LLM交互消息
+python main.py <project_type> <attack_surface> <code_dir> --model gpt-4o  # 指定模型
+python main.py <project_type> <attack_surface> <code_dir> --max-workers 5  # 并发数
+python main.py <project_type> <attack_surface> <code_dir> --skip-exploit  # 跳过漏洞利用
+```
+
+### LSP用法（C项目）
+
+```bash
+python main.py c civetweb /path/to/code --enable-lsp                    # 启用LSP
+python main.py c civetweb /path/to/code --enable-lsp --lsp-command clangd-17  # 指定LSP版本
+```
+
 ### 参数说明
 
-- `code_dir`: 要审计的代码目录路径
-- `project_type`: 项目类型（python/java/go/javascript/c）
-- `attack_surface`: 攻击面类型（web/cli/protobuf/blink）
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `project_type` | 项目类型 | python/c/go |
+| `attack_surface` | 攻击面 | web/cli/protobuf/blink/civetweb |
+| `code_dir` | 代码目录路径 | - |
 
 ### 可选参数
 
-- `--api-key`: OpenAI API密钥
-- `--base-url`: OpenAI API基础URL
-- `--model`: 使用的LLM模型（默认: gpt-4o）
-- `--max-workers`: 并发审计的最大工作线程数（默认: 5）
-- `--output-dir`: 报告输出目录
-- `--skip-exploit`: 跳过漏洞利用步骤
-- `--report-format`: 报告格式（markdown/json/html/all）
-- `--verbose`: 显示详细输出
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `--api-key` | OpenAI API密钥 | 环境变量 OPENAI_API_KEY |
+| `--base-url` | OpenAI API基础URL | 环境变量 OPENAI_BASE_URL |
+| `--model` | 使用的LLM模型 | gpt-4o |
+| `--max-workers` | 并发审计的最大工作线程数 | 1 |
+| `--output-dir` | 报告输出目录 | ./reports |
+| `--skip-exploit` | 跳过漏洞利用步骤 | False |
+| `--report-format` | 报告格式（markdown/json/html/all） | markdown |
+| `--verbose` | 显示详细输出 | False |
+| `--debug` | 显示LLM客户端交互的消息内容 | False |
+| `--enable-lsp` | 启用LSP（clangd）工具调用 | False |
+| `--lsp-command` | LSP服务器命令 | clangd |
+| `--list` | 列出历史: sessions/trace/audit/exploit | - |
+| `--session` | 指定会话ID恢复历史会话 | - |
+| `--from-stage` | 从指定阶段开始: scanner/trace/audit/exploit/report | - |
+| `--trace` | 使用历史追踪结果 | - |
+| `--audit` | 使用历史审计结果 | - |
+| `--exploit` | 使用历史漏洞利用结果 | - |
 
 ### 使用示例
 
@@ -153,9 +206,19 @@ python main.py python protobuf /path/to/code
 python main.py python blink /path/to/code
 ```
 
-审计C语言Web应用：
+审计C语言Web应用（civetweb）：
 ```bash
-python main.py c web /path/to/code
+python main.py c civetweb /path/to/code
+```
+
+启用LSP（需要 compile_commands.json）：
+```bash
+python main.py c civetweb /path/to/code --enable-lsp
+```
+
+恢复历史会话：
+```bash
+python main.py --session <会话ID>
 ```
 
 使用自定义模型和并发数：

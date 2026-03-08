@@ -75,16 +75,41 @@ class Config:
             description='基于LLM的代码审计AI Agent',
             formatter_class=argparse.RawDescriptionHelpFormatter,
             epilog=f"""
-示例用法:
+===== 基础用法 =====
+审计Python Web应用:
   python main.py python web /path/to/code
-  python main.py python cli /path/to/code
-  python main.py python protobuf /path/to/code
-  python main.py python blink /path/to/code
 
-列表查询:
+审计C语言civetweb应用:
+  python main.py c civetweb /path/to/code
+
+===== 列表查询 =====
   python main.py list                           # 查看支持的project_type
   python main.py <project_type> list            # 查看指定project_type支持的attack_surface
   python main.py <project_type> <attack_surface> list  # 查看支持的漏洞类型
+
+===== 会话管理 =====
+  python main.py --list sessions               # 列出所有历史会话
+  python main.py --session <会话ID>             # 恢复历史会话
+  python main.py --session <会话ID> --from-stage audit  # 从审计阶段继续
+
+===== 历史结果使用 =====
+  python main.py --list trace                  # 列出历史追踪结果
+  python main.py --trace <文件名>               # 使用历史追踪结果继续
+  python main.py --list audit                  # 列出历史审计结果
+  python main.py --audit <文件名>               # 使用历史审计结果进行漏洞利用
+  python main.py --list exploit                # 列出历史利用结果
+  python main.py --exploit <文件名>             # 使用历史利用结果生成报告
+
+===== 常用选项 =====
+  python main.py <project_type> <attack_surface> <code_dir> --verbose    # 显示详细输出
+  python main.py <project_type> <attack_surface> <code_dir> --debug      # 显示LLM交互消息
+  python main.py <project_type> <attack_surface> <code_dir> --model gpt-4o  # 指定模型
+  python main.py <project_type> <attack_surface> <code_dir> --max-workers 5  # 并发数
+  python main.py <project_type> <attack_surface> <code_dir> --skip-exploit  # 跳过漏洞利用
+
+===== LSP用法 =====
+  python main.py c civetweb /path/to/code --enable-lsp                    # 启用LSP（需要compile_commands.json）
+  python main.py c civetweb /path/to/code --enable-lsp --lsp-command clangd-17  # 指定LSP版本
 
 支持的项目类型: {', '.join(project_types)}
 支持的攻击面: {', '.join(all_attack_surfaces)}
@@ -207,6 +232,13 @@ class Config:
             help='从指定阶段开始执行（跳过前面阶段）'
         )
         
+        parser.add_argument(
+            '--docker-image',
+            type=str,
+            default=None,
+            help='Docker镜像名称:版本（如: ubuntu:22.04, mycodeaudit:latest），用于在容器内执行代码审计'
+        )
+        
         args = parser.parse_args()
         
         self.project_type = args.project_type
@@ -227,6 +259,7 @@ class Config:
         self.exploit = args.exploit
         self.session_id = args.session
         self.from_stage = args.from_stage
+        self.docker_image = args.docker_image
         self.list_type = args.list or getattr(args, 'list_type', None)
         self.raw_args = args
         self.env_loaded = _env_loaded

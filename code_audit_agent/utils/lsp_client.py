@@ -1,17 +1,19 @@
 import json
 import subprocess
 import os
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 from pathlib import Path
 
 
 class LSPClient:
-    def __init__(self, workspace_root: Optional[str] = None, compile_json_path: str = None):
+    def __init__(self, workspace_root: Optional[str] = None, compile_json_path: str = None,
+                 docker_manager=None):
         self.workspace_root = os.path.abspath(workspace_root or os.getcwd())
         self.process = None
         self.request_id = 0
         self._available = False
         self.compile_json_path = None
+        self.docker_manager = docker_manager
         
         if compile_json_path == None:
             compile_json_path = os.path.join(self.workspace_root, 'compile_commands.json')
@@ -45,26 +47,68 @@ class LSPClient:
             return False
         
         try:
-            self.process = subprocess.Popen(
-                'clangd',
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                cwd=self.workspace_root,
-                bufsize=0
-            )
-            return self.process.poll() is None
+            if self.docker_manager and self.docker_manager.container_id:
+                return self._start_in_docker()
+            else:
+                return self._start_local()
         except Exception as e:
             print(f"启动LSP服务器失败: {str(e)}")
             return False
 
+    def _start_local(self) -> bool:
+        self.process = subprocess.Popen(
+            'clangd',
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=self.workspace_root,
+            bufsize=0
+        )
+        return self.process.poll() is None
+
+    def _start_in_docker(self) -> bool:
+        container_compile_json = None
+        if self.compile_json_path:
+            container_compile_json = self.docker_manager.get_code_dir_in_container() + '/' + \
+                os.path.relpath(self.compile_json_path, self.workspace_root)
+
+        lsp_cmd = 'clangd'
+        if container_compile_json:
+            lsp_cmd = f'clangd --compile-commands-dir={os.path.dirname(container_compile_json)}'
+
+        cmd = f'cd {self.docker_manager.get_code_dir_in_container()} && {lsp_cmd}'
+        
+        result = self.docker_manager.execute_in_container(
+            f"nohup {cmd} > /tmp/clangd.log 2>&1 & echo $!",
+            timeout=30
+        )
+        
+        if result["success"]:
+            pid = result["stdout"].strip()
+            if pid.isdigit():
+                print(f"[LSP] LSP服务器已在Docker容器内启动 (PID: {pid})")
+                self.process = type('obj', (object,), {'poll': lambda self: None})()
+                return True
+        
+        return False
+
     def stop(self):
         if self.process:
-            self._send_notification("exit", {})
-            try:
-                self.process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.process.terminate()
+            if self.docker_manager and self.docker_manager.container_id:
+                self._stop_in_docker()
+            else:
+                self._send_notification("exit", {})
+                try:
+                    self.process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self.process.terminate()
+
+    def _stop_in_docker(self):
+        if self.docker_manager and self.docker_manager.container_id:
+            self.docker_manager.execute_in_container("pkill -f clangd || true", timeout=10)
+        if self.process:
+            self.process = None
+        print("[LSP] LSP服务器已停止")
 
     def _send_message(self, message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         if not self.process or self.process.poll() is not None:

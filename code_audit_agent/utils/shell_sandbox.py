@@ -12,7 +12,7 @@ from typing import Dict, Any, Optional, Tuple
 class ShellSandbox:
     """Shell 沙盒，在指定目录执行命令，维护会话状态"""
     
-    def __init__(self, code_dir: str, timeout: int = 60):
+    def __init__(self, code_dir: str, timeout: int = 60, docker_manager=None):
         self.code_dir = os.path.abspath(code_dir)
         self.timeout = timeout
         self.env = os.environ.copy()
@@ -20,6 +20,7 @@ class ShellSandbox:
         
         self.process: Optional[subprocess.Popen] = None
         self.cwd = code_dir
+        self.docker_manager = docker_manager
         
         self.dangerous_patterns = [
             r'\.\./',  
@@ -38,12 +39,38 @@ class ShellSandbox:
     
     def _start_shell(self):
         """启动持久化的 bash 会话"""
+        if self.docker_manager and self.docker_manager.container_id:
+            self._start_docker_shell()
+        else:
+            self._start_local_shell()
+    
+    def _start_local_shell(self):
+        """启动本地 bash 会话"""
         self.process = subprocess.Popen(
             ["bash"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=self.cwd,
+            env=self.env,
+            text=True,
+            encoding='utf-8',
+            errors='replace',
+            bufsize=1
+        )
+    
+    def _start_docker_shell(self):
+        """启动 Docker 容器内的 bash 会话"""
+        container_code_dir = self.docker_manager.get_code_dir_in_container()
+        
+        cmd = f"docker exec -it {self.docker_manager.container_id} bash"
+        self.process = subprocess.Popen(
+            cmd,
+            shell=True,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=self.code_dir,
             env=self.env,
             text=True,
             encoding='utf-8',
@@ -98,6 +125,13 @@ class ShellSandbox:
                 "error": error_msg
             }
         
+        if self.docker_manager and self.docker_manager.container_id:
+            return self._execute_in_docker(cmd)
+        
+        return self._execute_local(cmd)
+    
+    def _execute_local(self, cmd: str) -> Dict[str, Any]:
+        """在本地执行命令"""
         if not self.process or self.process.poll() is not None:
             self._start_shell()
         
@@ -187,6 +221,13 @@ class ShellSandbox:
         执行 Python 代码
         返回: {"success": bool, "stdout": str, "stderr": str, "returncode": int}
         """
+        if self.docker_manager and self.docker_manager.container_id:
+            return self._execute_python_in_docker(code)
+        
+        return self._execute_python_local(code)
+    
+    def _execute_python_local(self, code: str) -> Dict[str, Any]:
+        """在本地执行 Python 代码"""
         try:
             result = subprocess.run(
                 ["python3", "-c", code],
@@ -213,14 +254,18 @@ class ShellSandbox:
                 "returncode": -1,
                 "error": "timeout"
             }
-        except Exception as e:
-            return {
-                "success": False,
-                "stdout": "",
-                "stderr": str(e),
-                "returncode": -1,
-                "error": str(e)
-            }
+    
+    def _execute_python_in_docker(self, code: str) -> Dict[str, Any]:
+        """在 Docker 容器内执行 Python 代码"""
+        escaped_code = code.replace("'", "'\\''")
+        cmd = f"python3 -c '{escaped_code}'"
+        return self.docker_manager.execute_in_container(cmd, self.timeout)
+    
+    def _execute_in_docker(self, cmd: str) -> Dict[str, Any]:
+        """在 Docker 容器内执行命令"""
+        container_code_dir = self.docker_manager.get_code_dir_in_container()
+        full_cmd = f"cd {container_code_dir} && {cmd}"
+        return self.docker_manager.execute_in_container(full_cmd, self.timeout)
     
     def call_tool(self, tool_call: Dict[str, Any]) -> Dict[str, Any]:
         """
